@@ -15,14 +15,15 @@
 - [x] `tests/test_crt_detector.py` — 14 tests sintéticos, 14/14 ✓
 - [x] `check_phase2.py` — smoke test verificado (1005 señales en 9 pares H4)
 
-## Fase 3 — Key Levels & HTF Confluence ⏳
-- [ ] `core/fvg_detector.py` — Fair Value Gaps en cualquier TF (bullish/bearish)
-- [ ] `core/ob_detector.py` — Order Blocks bullish y bearish
-- [ ] `core/htf_confluence.py` — cruza CRTSignal (H4) con Key Levels (Diario), retorna score A/B
-- [ ] `tests/test_fvg_detector.py`
-- [ ] `tests/test_ob_detector.py`
-- [ ] `tests/test_htf_confluence.py`
-- [ ] `check_phase3.py` — smoke test
+## Fase 3 — Key Levels & HTF Confluence ✅
+- [x] `core/models.py` — añadidos `KeyLevel`, `KeyLevelType`, `Score`, `ConfluenceResult`
+- [x] `core/fvg_detector.py` — Fair Value Gaps bullish y bearish en cualquier TF
+- [x] `core/ob_detector.py` — Order Blocks + Swing Highs/Lows
+- [x] `core/htf_confluence.py` — `run_confluence()` cruza CRT H4 con Key Levels Diario, score A/B
+- [x] `tests/test_fvg_detector.py` — 6/6 ✓
+- [x] `tests/test_ob_detector.py` — 7/7 ✓
+- [x] `tests/test_htf_confluence.py` — 7/7 ✓
+- [x] `check_phase3.py` — smoke test verificado (29 Score A en 9 pares)
 
 ## Fase 4 — Entry Models ⏳
 - [ ] `core/entry_models.py` — busca en M15 el trigger dentro de la zona CRT: OB, FVG, Breaker Block, Turtle Soup (TWS/TBS)
