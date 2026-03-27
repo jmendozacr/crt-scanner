@@ -91,3 +91,43 @@ class ConfluenceResult:
     def __repr__(self) -> str:
         kl = repr(self.key_level) if self.key_level else "none"
         return f"Confluence(Score {self.score.value} | {self.signal!r} | {kl})"
+
+
+# ---------------------------------------------------------------------------
+# Entry Models (Fase 4)
+# ---------------------------------------------------------------------------
+
+class EntryModel(str, Enum):
+    ORDER_BLOCK       = "OB"
+    FVG               = "FVG"
+    BREAKER_BLOCK     = "Breaker Block"
+    TURTLE_SOUP_WICK  = "TWS"   # wick sweeps M15 swing, body closes back
+    TURTLE_SOUP_BODY  = "TBS"   # body sweeps M15 swing, next candle reverses
+
+
+# Detection priority: higher = more specific, wins on same-candle ties
+ENTRY_PRIORITY: dict[EntryModel, int] = {
+    EntryModel.ORDER_BLOCK:      1,
+    EntryModel.FVG:              2,
+    EntryModel.BREAKER_BLOCK:    3,
+    EntryModel.TURTLE_SOUP_WICK: 4,
+    EntryModel.TURTLE_SOUP_BODY: 5,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class EntrySignal:
+    confluence: ConfluenceResult
+    entry_model: EntryModel
+    entry_zone_low:  float
+    entry_zone_high: float
+    time: datetime   # M15 candle that triggered the entry
+    pair: str
+
+    def __repr__(self) -> str:
+        mid = (self.entry_zone_low + self.entry_zone_high) / 2
+        return (
+            f"EntrySignal({self.entry_model.value} @ {mid:.5f} "
+            f"[{self.entry_zone_low:.5f}–{self.entry_zone_high:.5f}] "
+            f"{self.pair} M15 @ {self.time.isoformat()})"
+        )

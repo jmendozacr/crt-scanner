@@ -25,10 +25,10 @@
 - [x] `tests/test_htf_confluence.py` — 7/7 ✓
 - [x] `check_phase3.py` — smoke test verificado (29 Score A en 9 pares)
 
-## Fase 4 — Entry Models ⏳
-- [ ] `core/entry_models.py` — busca en M15 el trigger dentro de la zona CRT: OB, FVG, Breaker Block, Turtle Soup (TWS/TBS)
-- [ ] `tests/test_entry_models.py`
-- [ ] `check_phase4.py` — smoke test
+## Fase 4 — Entry Models ✅
+- [x] `core/entry_models.py` — busca en M15 el trigger dentro de la zona CRT: OB, FVG, Breaker Block, Turtle Soup (TWS/TBS)
+- [x] `tests/test_entry_models.py` — 13/13 ✓
+- [x] `check_phase4.py` — smoke test verificado (29 entradas en 7 pares)
 
 ## Fase 5 — Telegram Alerts ⏳
 - [ ] `output/telegram_bot.py` — envío de alertas formateadas (Score A/B, par, dirección, entry zone, CRT H/L)
