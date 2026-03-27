@@ -1,0 +1,39 @@
+# CRT Scanner — Task Tracker
+
+## Fase 1 — Data Layer ✅
+- [x] `config.py` — pydantic-settings, lectura de `.env`, parseo CSV de pares
+- [x] `data/twelvedata_client.py` — cliente async aiohttp, `get_candles()`, `poll_candles()` con batch requests
+- [x] `data/candle_store.py` — buffer rolling pandas por `(pair, granularity)`, deduplicación por timestamp
+- [x] `requirements.txt`, `.env.example`, `.gitignore`
+- [x] `check_phase1.py` — smoke test verificado contra Twelve Data
+
+## Fase 2 — CRT Detector ✅
+- [x] `core/models.py` — `CRTSignal`, `Direction`, `CRTModel`, tabla de prioridades
+- [x] `core/liquidity_sweeper.py` — helpers puros: `swept_high/low`, `closed_back`, `is_inside_bar`
+- [x] `core/power_of_3.py` — `classify_candles()` etiqueta ACCUMULATION / MANIPULATION / DISTRIBUTION
+- [x] `core/crt_detector.py` — `detect()` con los 4 modelos + deduplicación por prioridad
+- [x] `tests/test_crt_detector.py` — 14 tests sintéticos, 14/14 ✓
+- [x] `check_phase2.py` — smoke test verificado (1005 señales en 9 pares H4)
+
+## Fase 3 — Key Levels & HTF Confluence ⏳
+- [ ] `core/fvg_detector.py` — Fair Value Gaps en cualquier TF (bullish/bearish)
+- [ ] `core/ob_detector.py` — Order Blocks bullish y bearish
+- [ ] `core/htf_confluence.py` — cruza CRTSignal (H4) con Key Levels (Diario), retorna score A/B
+- [ ] `tests/test_fvg_detector.py`
+- [ ] `tests/test_ob_detector.py`
+- [ ] `tests/test_htf_confluence.py`
+- [ ] `check_phase3.py` — smoke test
+
+## Fase 4 — Entry Models ⏳
+- [ ] `core/entry_models.py` — busca en M15 el trigger dentro de la zona CRT: OB, FVG, Breaker Block, Turtle Soup (TWS/TBS)
+- [ ] `tests/test_entry_models.py`
+- [ ] `check_phase4.py` — smoke test
+
+## Fase 5 — Telegram Alerts ⏳
+- [ ] `output/telegram_bot.py` — envío de alertas formateadas (Score A/B, par, dirección, entry zone, CRT H/L)
+- [ ] Test manual de formato de alerta
+
+## Fase 6 — Orquestación ⏳
+- [ ] `main.py` — loop asyncio, polling M15, pipeline completo por par
+- [ ] Integración end-to-end: data → CRT → confluence → entry → alert
+- [ ] Test de integración con un par en tiempo real
