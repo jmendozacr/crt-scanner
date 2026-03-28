@@ -35,6 +35,12 @@
 - [x] `tests/test_telegram_bot.py` — 26/26 ✓
 - [x] `check_phase5.py` — smoke test verificado (formato OK, --send disponible)
 
+## Fase 7 — Backtesting ✅
+- [x] `backtest/evaluator.py` — `TradeResult` + `evaluate_trade()` (WIN/LOSS/OPEN, pip P&L)
+- [x] `backtest/runner.py` — walk-forward simulation, pre-filter a M15 window, tail(100) para replicar live scanner
+- [x] `backtest/report.py` — tabla de consola por par + totales (Win%, Profit Factor)
+- [x] `backtest.py` — CLI con `--rr`, `--pair`, `--min-score`
+
 ## Fase 6 — Orquestación ✅
 - [x] `main.py` — bootstrap + loop asyncio con `poll_candles`, pipeline completo, shutdown limpio
 - [x] `check_phase6.py` — smoke test end-to-end verificado (bootstrap + pipeline, sin Telegram)
