@@ -1,214 +1,144 @@
 """
-CRT Detector — detects all 4 CRT models on a DataFrame of candles.
+CRT Detector — detects H4 candle range sweeps (Clutifx refactor).
 
 Public API:
-    detect(df, pair, granularity) -> list[CRTSignal]
+    detect_crt(df, pair, lookback) -> list[CRTSetup]
+
+Logic:
+    Takes the last closed H4 candle (sweep_candle) and checks whether
+    its wick swept the High or Low of any reference candle within the
+    last `lookback` candles, WITHOUT closing through it (no breakout).
+
+    Bearish CRT: sweep.high > ref.high  AND  sweep.close < ref.high
+    Bullish CRT: sweep.low  < ref.low   AND  sweep.close > ref.low
 
 Input df columns: [time, open, high, low, close, volume, complete]
-    - Ordered oldest → newest (output of CandleStore.get())
-    - The function internally filters to complete == True rows only.
-
-The 4 models detected:
-    TWO_CANDLE   — sweep + close in a single candle
-    THREE_CANDLE — ref + manipulation + distribution (3 separate candles)
-    MULTI_CANDLE — ref + 2-5 sweep candles + final close-back
-    INSIDE_BAR   — ref is an inside bar; sweep targets inside bar's range
+    Ordered oldest → newest (output of CandleStore.get()).
 """
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 
 import pandas as pd
 
-from core.liquidity_sweeper import (
-    closed_above_low,
-    closed_below_high,
-    is_inside_bar,
-    swept_high,
-    swept_low,
-)
-from core.models import MODEL_PRIORITY, CRTModel, CRTSignal, Direction
-
 logger = logging.getLogger(__name__)
 
-# Maximum number of sweep candles to consider for Multi Candle CRT
-_MULTI_MAX_SWEEPS = 5
+
+# ---------------------------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------------------------
+
+@dataclass
+class OBLevel:
+    """M15 Order Block zone used by the Clutifx entry model."""
+    high: float
+    low: float
+    formed_at: pd.Timestamp
+    invalidated: bool = False
 
 
-def detect(
+@dataclass
+class CRTSetup:
+    """
+    A detected CRT sweep on H4.
+
+    Status flow:
+        "pending"
+        → "watching_m15"   (after HTF confluence confirmed in main.py)
+        → "ob_formed"      (after find_engulfing_ob() finds the OB)
+        → "triggered"      (after OB touch → send alert)
+        → "invalidated"    (after OB invalidation)
+        → "expired"        (expires_at passed without resolution)
+    """
+    pair: str
+    direction: str              # "bearish" | "bullish"
+    ref_candle: pd.Series       # H4 candle whose extreme was swept
+    sweep_candle: pd.Series     # H4 candle that made the sweep
+    crt_h: float                # ref_candle["high"]
+    crt_l: float                # ref_candle["low"]
+    expires_at: pd.Timestamp    # sweep_candle["time"] + 4h
+    htf_level: object = field(default=None)   # KeyLevel | None, set by main.py
+    ob: OBLevel | None = field(default=None)
+    status: str = field(default="pending")
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def detect_crt(
     df: pd.DataFrame,
     pair: str,
-    granularity: str,
-) -> list[CRTSignal]:
+    lookback: int = 10,
+) -> list[CRTSetup]:
     """
-    Detect all valid CRT patterns in `df`.
+    Detect H4 CRT sweeps on the last closed candle.
 
     Args:
-        df:          DataFrame with OHLCV columns, oldest → newest.
-        pair:        Internal pair name, e.g. "EUR_USD".
-        granularity: Granularity string, e.g. "H4".
+        df:       DataFrame with OHLCV columns, oldest → newest.
+        pair:     Internal pair name, e.g. "EUR_USD".
+        lookback: How many previous candles to check as potential ref_candle.
 
     Returns:
-        List of CRTSignal, deduplicated by (sweep_time, direction).
+        List of CRTSetup sorted by proximity to current price (closest first).
         Empty list if no patterns found or insufficient data.
     """
+    if df.empty or "complete" not in df.columns:
+        return []
+
     complete = df[df["complete"]].reset_index(drop=True)
     n = len(complete)
 
     if n < 2:
-        logger.debug("detect: not enough complete candles (%d) for %s %s", n, pair, granularity)
+        logger.debug("detect_crt: not enough complete candles (%d) for %s", n, pair)
         return []
 
-    raw: list[CRTSignal] = []
+    sweep = complete.iloc[-1]
+    # Window: up to `lookback` candles immediately before the sweep candle
+    window_start = max(0, n - lookback - 1)
+    window = complete.iloc[window_start: n - 1]
 
-    for i in range(1, n):
-        raw.extend(_two_candle(complete, i, pair, granularity))
+    current_price = (float(sweep["high"]) + float(sweep["low"])) / 2
+    expires_at = sweep["time"] + pd.Timedelta(hours=4)
 
-        if i >= 2:
-            raw.extend(_three_candle(complete, i, pair, granularity))
-            raw.extend(_inside_bar(complete, i, pair, granularity))
+    setups: list[CRTSetup] = []
 
-        if i >= 3:
-            raw.extend(_multi_candle(complete, i, pair, granularity))
+    for _, ref in window.iterrows():
+        ref_high = float(ref["high"])
+        ref_low = float(ref["low"])
+        sw_high = float(sweep["high"])
+        sw_low = float(sweep["low"])
+        sw_close = float(sweep["close"])
 
-    signals = _deduplicate(raw)
+        # Bearish CRT: wick swept above ref.high, body closed back below it
+        if sw_high > ref_high and sw_close < ref_high:
+            setups.append(CRTSetup(
+                pair=pair,
+                direction="bearish",
+                ref_candle=ref,
+                sweep_candle=sweep,
+                crt_h=ref_high,
+                crt_l=ref_low,
+                expires_at=expires_at,
+            ))
+
+        # Bullish CRT: wick swept below ref.low, body closed back above it
+        if sw_low < ref_low and sw_close > ref_low:
+            setups.append(CRTSetup(
+                pair=pair,
+                direction="bullish",
+                ref_candle=ref,
+                sweep_candle=sweep,
+                crt_h=ref_high,
+                crt_l=ref_low,
+                expires_at=expires_at,
+            ))
+
+    # Sort by proximity to current price — closest range midpoint first
+    setups.sort(key=lambda s: abs(current_price - (s.crt_h + s.crt_l) / 2))
+
     logger.debug(
-        "detect: %d raw → %d unique signals for %s %s", len(raw), len(signals), pair, granularity
+        "detect_crt: %d setup(s) for %s (lookback=%d)", len(setups), pair, lookback
     )
-    return signals
-
-
-# ---------------------------------------------------------------------------
-# Model detectors (private)
-# ---------------------------------------------------------------------------
-
-def _two_candle(
-    df: pd.DataFrame, i: int, pair: str, granularity: str
-) -> list[CRTSignal]:
-    ref = df.iloc[i - 1]
-    sweep = df.iloc[i]
-    signals = []
-
-    if swept_low(sweep, ref) and closed_above_low(sweep, ref):
-        signals.append(_signal(CRTModel.TWO_CANDLE, Direction.BULLISH, ref, sweep, pair, granularity))
-
-    if swept_high(sweep, ref) and closed_below_high(sweep, ref):
-        signals.append(_signal(CRTModel.TWO_CANDLE, Direction.BEARISH, ref, sweep, pair, granularity))
-
-    return signals
-
-
-def _three_candle(
-    df: pd.DataFrame, i: int, pair: str, granularity: str
-) -> list[CRTSignal]:
-    ref = df.iloc[i - 2]
-    manip = df.iloc[i - 1]
-    dist = df.iloc[i]
-    signals = []
-
-    # Bullish: manip sweeps ref's low; dist closes back above ref's low
-    if swept_low(manip, ref) and float(dist["close"]) > float(ref["low"]):
-        signals.append(_signal(CRTModel.THREE_CANDLE, Direction.BULLISH, ref, dist, pair, granularity))
-
-    # Bearish: manip sweeps ref's high; dist closes back below ref's high
-    if swept_high(manip, ref) and float(dist["close"]) < float(ref["high"]):
-        signals.append(_signal(CRTModel.THREE_CANDLE, Direction.BEARISH, ref, dist, pair, granularity))
-
-    return signals
-
-
-def _inside_bar(
-    df: pd.DataFrame, i: int, pair: str, granularity: str
-) -> list[CRTSignal]:
-    outer = df.iloc[i - 2]
-    inside = df.iloc[i - 1]
-    sweep = df.iloc[i]
-    signals = []
-
-    if not is_inside_bar(inside, outer):
-        return signals
-
-    # CRT range is the inside bar's high/low — not the outer candle's
-    if swept_low(sweep, inside) and closed_above_low(sweep, inside):
-        signals.append(_signal(CRTModel.INSIDE_BAR, Direction.BULLISH, inside, sweep, pair, granularity))
-
-    if swept_high(sweep, inside) and closed_below_high(sweep, inside):
-        signals.append(_signal(CRTModel.INSIDE_BAR, Direction.BEARISH, inside, sweep, pair, granularity))
-
-    return signals
-
-
-def _multi_candle(
-    df: pd.DataFrame, i: int, pair: str, granularity: str
-) -> list[CRTSignal]:
-    """
-    Multi Candle CRT: ref + N sweep candles (2 ≤ N ≤ _MULTI_MAX_SWEEPS) + final close-back.
-
-    The sweep candles all breach the same side of the ref without closing back.
-    The final candle closes back inside.
-    """
-    signals = []
-    final = df.iloc[i]
-
-    # n = total sweep candles between ref and final (at least 2)
-    for n in range(2, min(_MULTI_MAX_SWEEPS + 1, i)):
-        ref_idx = i - n - 1
-        if ref_idx < 0:
-            break
-        ref = df.iloc[ref_idx]
-        sweeps = [df.iloc[ref_idx + k] for k in range(1, n + 1)]
-
-        # Bullish: all sweeps go below ref.low; final closes back above ref.low
-        if (
-            all(swept_low(s, ref) for s in sweeps)
-            and float(final["close"]) > float(ref["low"])
-        ):
-            signals.append(_signal(CRTModel.MULTI_CANDLE, Direction.BULLISH, ref, final, pair, granularity))
-
-        # Bearish: all sweeps go above ref.high; final closes back below ref.high
-        if (
-            all(swept_high(s, ref) for s in sweeps)
-            and float(final["close"]) < float(ref["high"])
-        ):
-            signals.append(_signal(CRTModel.MULTI_CANDLE, Direction.BEARISH, ref, final, pair, granularity))
-
-    return signals
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _signal(
-    model: CRTModel,
-    direction: Direction,
-    ref: pd.Series,
-    trigger: pd.Series,
-    pair: str,
-    granularity: str,
-) -> CRTSignal:
-    return CRTSignal(
-        model=model,
-        direction=direction,
-        crt_high=float(ref["high"]),
-        crt_low=float(ref["low"]),
-        ref_time=ref["time"],
-        sweep_time=trigger["time"],
-        pair=pair,
-        granularity=granularity,
-    )
-
-
-def _deduplicate(signals: list[CRTSignal]) -> list[CRTSignal]:
-    """
-    For each (sweep_time, direction) key, keep only the highest-priority model.
-    Priority: INSIDE_BAR > THREE_CANDLE > MULTI_CANDLE > TWO_CANDLE
-    """
-    best: dict[tuple, CRTSignal] = {}
-    for sig in signals:
-        key = (sig.sweep_time, sig.direction)
-        existing = best.get(key)
-        if existing is None or MODEL_PRIORITY[sig.model] > MODEL_PRIORITY[existing.model]:
-            best[key] = sig
-    # Return sorted by sweep_time for deterministic output
-    return sorted(best.values(), key=lambda s: s.sweep_time)
+    return setups

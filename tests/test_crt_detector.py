@@ -1,42 +1,31 @@
 """
-Unit tests for core/crt_detector.py using synthetic DataFrames.
+Unit tests for core/crt_detector.py — Clutifx H4 sweep detection.
 
-Each test builds a minimal OHLCV DataFrame with hand-crafted candles
-that should (or should not) trigger a specific CRT model.
+Each test builds a minimal OHLCV DataFrame with synthetic H4 candles
+that should (or should not) trigger a CRTSetup.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 
 import pandas as pd
 import pytest
 
-from core.crt_detector import detect
-from core.models import CRTModel, Direction
+from core.crt_detector import detect_crt, CRTSetup
+
+_T0 = datetime(2025, 1, 1, tzinfo=timezone.utc)
+PAIR = "EUR_USD"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-_T0 = datetime(2025, 1, 1, tzinfo=timezone.utc)
-
-
-def _candle(
-    n: int,
-    open_: float,
-    high: float,
-    low: float,
-    close: float,
-    complete: bool = True,
-) -> dict:
+def _c(n: int, o: float, h: float, l: float, c: float, complete: bool = True) -> dict:
     return {
         "time": _T0 + timedelta(hours=4 * n),
-        "open": open_,
-        "high": high,
-        "low": low,
-        "close": close,
-        "volume": 1000,
-        "complete": complete,
+        "open": o, "high": h, "low": l, "close": c,
+        "volume": 0, "complete": complete,
     }
 
 
@@ -44,189 +33,198 @@ def _df(*rows: dict) -> pd.DataFrame:
     return pd.DataFrame(list(rows))
 
 
-PAIR = "EUR_USD"
-GRAN = "H4"
+# ---------------------------------------------------------------------------
+# Basic detection
+# ---------------------------------------------------------------------------
+
+class TestBearishCRT:
+    def test_bearish_simple(self):
+        """sweep.high > ref.high AND sweep.close < ref.high → 1 bearish setup."""
+        df = _df(
+            _c(0, 1.10, 1.12, 1.09, 1.11),    # ref
+            _c(1, 1.11, 1.13, 1.095, 1.115),  # sweep: high=1.13>1.12, close=1.115<1.12, low=1.095>ref.low → only bearish
+        )
+        result = detect_crt(df, PAIR, lookback=10)
+        assert len(result) == 1
+        assert result[0].direction == "bearish"
+        assert result[0].crt_h == pytest.approx(1.12)
+        assert result[0].crt_l == pytest.approx(1.09)
+
+    def test_breakout_not_crt(self):
+        """sweep.close > ref.high (breakout, not a sweep) → no bearish setup."""
+        df = _df(
+            _c(0, 1.10, 1.12, 1.09, 1.11),   # ref
+            _c(1, 1.11, 1.13, 1.10, 1.125),   # sweep: close=1.125 > ref.high=1.12
+        )
+        result = detect_crt(df, PAIR)
+        bearish = [s for s in result if s.direction == "bearish"]
+        assert bearish == []
+
+
+class TestBullishCRT:
+    def test_bullish_simple(self):
+        """sweep.low < ref.low AND sweep.close > ref.low → 1 bullish setup."""
+        df = _df(
+            _c(0, 1.10, 1.12, 1.09, 1.105),  # ref
+            _c(1, 1.10, 1.115, 1.08, 1.095),  # sweep: low=1.08<1.09, close=1.095>1.09
+        )
+        result = detect_crt(df, PAIR, lookback=10)
+        assert len(result) == 1
+        assert result[0].direction == "bullish"
+        assert result[0].crt_l == pytest.approx(1.09)
+
+    def test_breakout_down_not_crt(self):
+        """sweep.close < ref.low (downward breakout) → no bullish setup."""
+        df = _df(
+            _c(0, 1.10, 1.12, 1.09, 1.105),  # ref
+            _c(1, 1.10, 1.115, 1.08, 1.085),  # sweep: close=1.085 < ref.low=1.09
+        )
+        result = detect_crt(df, PAIR)
+        bullish = [s for s in result if s.direction == "bullish"]
+        assert bullish == []
 
 
 # ---------------------------------------------------------------------------
-# 2 Candle CRT
+# No signal
 # ---------------------------------------------------------------------------
 
-class TestTwoCandle:
-    def test_bullish(self):
-        """Sweep low of ref, close back above it."""
+class TestNoSignal:
+    def test_no_sweep_no_signal(self):
+        """sweep does not exceed any ref extreme → empty list."""
         df = _df(
-            _candle(0, 1.10, 1.12, 1.08, 1.11),   # ref: range 1.08–1.12
-            _candle(1, 1.11, 1.115, 1.07, 1.09),  # sweep: low=1.07 < 1.08 ✓, high=1.115 < 1.12 (no bearish)
+            _c(0, 1.10, 1.12, 1.09, 1.11),   # ref
+            _c(1, 1.10, 1.115, 1.095, 1.11),  # sweep: high < ref.high, low > ref.low
         )
-        signals = detect(df, PAIR, GRAN)
-        assert len(signals) == 1
-        s = signals[0]
-        assert s.model == CRTModel.TWO_CANDLE
-        assert s.direction == Direction.BULLISH
-        assert s.crt_high == pytest.approx(1.12)
-        assert s.crt_low == pytest.approx(1.08)
+        assert detect_crt(df, PAIR) == []
 
-    def test_bearish(self):
-        """Sweep high of ref, close back below it."""
-        df = _df(
-            _candle(0, 1.10, 1.12, 1.08, 1.11),  # ref: range 1.08–1.12
-            _candle(1, 1.11, 1.14, 1.09, 1.11),  # sweep: high=1.14 > 1.12, close=1.11 < 1.12
-        )
-        signals = detect(df, PAIR, GRAN)
-        assert len(signals) == 1
-        s = signals[0]
-        assert s.model == CRTModel.TWO_CANDLE
-        assert s.direction == Direction.BEARISH
+    def test_too_few_candles(self):
+        """Only 1 complete candle → []."""
+        df = _df(_c(0, 1.10, 1.12, 1.09, 1.11))
+        assert detect_crt(df, PAIR) == []
 
-    def test_no_signal_when_no_sweep(self):
-        """Candle stays within ref range — no CRT."""
-        df = _df(
-            _candle(0, 1.10, 1.12, 1.08, 1.11),
-            _candle(1, 1.10, 1.11, 1.09, 1.10),  # within range
-        )
-        assert detect(df, PAIR, GRAN) == []
-
-    def test_no_signal_when_closes_outside(self):
-        """Sweep low but close stays below ref.low — not a valid CRT (no return)."""
-        df = _df(
-            _candle(0, 1.10, 1.12, 1.08, 1.11),
-            _candle(1, 1.10, 1.11, 1.07, 1.075),  # low=1.07 swept, close=1.075 < 1.08
-        )
-        assert detect(df, PAIR, GRAN) == []
-
-    def test_incomplete_candle_ignored(self):
-        """An incomplete sweep candle must NOT trigger a signal."""
-        df = _df(
-            _candle(0, 1.10, 1.12, 1.08, 1.11),
-            _candle(1, 1.11, 1.13, 1.07, 1.09, complete=False),  # would be bullish but incomplete
-        )
-        assert detect(df, PAIR, GRAN) == []
-
-    def test_insufficient_data(self):
-        """Single candle returns empty."""
-        df = _df(_candle(0, 1.10, 1.12, 1.08, 1.11))
-        assert detect(df, PAIR, GRAN) == []
+    def test_empty_dataframe(self):
+        """Empty df → []."""
+        df = _df()
+        assert detect_crt(df, PAIR) == []
 
 
 # ---------------------------------------------------------------------------
-# 3 Candle CRT
+# Incomplete candles
 # ---------------------------------------------------------------------------
 
-class TestThreeCandle:
-    def test_bullish(self):
-        """Manip sweeps low, dist closes back above ref.low."""
+class TestIncompleteCandlesIgnored:
+    def test_incomplete_sweep_not_used(self):
+        """If the last candle is incomplete it should NOT be used as sweep_candle."""
         df = _df(
-            _candle(0, 1.10, 1.12, 1.08, 1.11),   # ref
-            _candle(1, 1.11, 1.115, 1.06, 1.07),  # manip: low=1.06 < 1.08 ✓, high=1.115 < 1.12 (no bearish)
-            _candle(2, 1.07, 1.11, 1.06, 1.10),   # dist: close=1.10 > ref.low=1.08 ✓
+            _c(0, 1.10, 1.12, 1.09, 1.11),            # ref (complete)
+            _c(1, 1.11, 1.13, 1.08, 1.115, False),    # incomplete sweep → ignored
         )
-        signals = detect(df, PAIR, GRAN)
-        three = [s for s in signals if s.model == CRTModel.THREE_CANDLE]
-        assert len(three) == 1
-        assert three[0].direction == Direction.BULLISH
+        # Only 1 complete candle → []
+        assert detect_crt(df, PAIR) == []
 
-    def test_bearish(self):
-        """Manip sweeps high, dist closes back below ref.high."""
+    def test_incomplete_ref_not_used(self):
+        """Incomplete candles in the window are not evaluated as ref_candle."""
         df = _df(
-            _candle(0, 1.10, 1.12, 1.08, 1.11),  # ref
-            _candle(1, 1.11, 1.15, 1.09, 1.14),  # manip: sweeps high (1.15 > 1.12), no return
-            _candle(2, 1.14, 1.15, 1.09, 1.09),  # dist: close=1.09 < ref.high=1.12 ✓
+            _c(0, 1.10, 1.12, 1.09, 1.11, False),    # incomplete ref → ignored
+            _c(1, 1.11, 1.13, 1.08, 1.115),           # sweep (only complete)
         )
-        signals = detect(df, PAIR, GRAN)
-        three = [s for s in signals if s.model == CRTModel.THREE_CANDLE]
-        assert len(three) == 1
-        assert three[0].direction == Direction.BEARISH
+        # Only 1 complete candle → []
+        assert detect_crt(df, PAIR) == []
 
 
 # ---------------------------------------------------------------------------
-# Inside Bar CRT
+# Lookback
 # ---------------------------------------------------------------------------
 
-class TestInsideBar:
-    def test_bullish(self):
-        """Inside bar swept at low, sweep closes back above inside.low."""
-        df = _df(
-            _candle(0, 1.10, 1.15, 1.05, 1.12),  # outer
-            _candle(1, 1.11, 1.13, 1.08, 1.12),  # inside bar (within outer)
-            _candle(2, 1.12, 1.13, 1.07, 1.09),  # sweep: low=1.07 < inside.low=1.08, close=1.09 > 1.08
-        )
-        signals = detect(df, PAIR, GRAN)
-        ib = [s for s in signals if s.model == CRTModel.INSIDE_BAR]
-        assert len(ib) == 1
-        assert ib[0].direction == Direction.BULLISH
-        # CRT range = inside bar's range, not outer's
-        assert ib[0].crt_high == pytest.approx(1.13)
-        assert ib[0].crt_low == pytest.approx(1.08)
+class TestLookback:
+    def test_lookback_respected(self):
+        """A ref_candle that is exactly outside the lookback window is not detected."""
+        # Build 12 neutral candles, ref at index 0, sweep at index 11
+        rows = [_c(i, 1.10, 1.105 + i * 0.001, 1.095, 1.10) for i in range(10)]
+        # ref_candle at position 0 has high=1.105
+        rows[0] = _c(0, 1.10, 1.105, 1.095, 1.10)
+        # neutral candles 1-9
+        # sweep at position 10 sweeps ref[0].high but ref[0] is outside lookback=9
+        rows.append(_c(10, 1.10, 1.11, 1.09, 1.104))  # high=1.11>1.105, close<1.105
+        df = _df(*rows)
+        # With lookback=9, the window covers candles 1-9 → ref[0] is excluded
+        result = detect_crt(df, PAIR, lookback=9)
+        bearish = [s for s in result if s.direction == "bearish"
+                   and s.crt_h == pytest.approx(1.105)]
+        assert bearish == []
 
-    def test_bearish(self):
-        """Inside bar swept at high, sweep closes back below inside.high."""
-        df = _df(
-            _candle(0, 1.10, 1.15, 1.05, 1.12),  # outer
-            _candle(1, 1.11, 1.13, 1.08, 1.12),  # inside bar
-            _candle(2, 1.12, 1.14, 1.09, 1.12),  # sweep: high=1.14 > 1.13, close=1.12 < 1.13
-        )
-        signals = detect(df, PAIR, GRAN)
-        ib = [s for s in signals if s.model == CRTModel.INSIDE_BAR]
-        assert len(ib) == 1
-        assert ib[0].direction == Direction.BEARISH
-
-    def test_no_signal_when_not_inside_bar(self):
-        """Middle candle is NOT an inside bar — no Inside Bar CRT."""
-        df = _df(
-            _candle(0, 1.10, 1.12, 1.08, 1.11),
-            _candle(1, 1.11, 1.13, 1.07, 1.10),  # NOT inside bar (goes below outer.low)
-            _candle(2, 1.10, 1.14, 1.06, 1.12),
-        )
-        ib = [s for s in detect(df, PAIR, GRAN) if s.model == CRTModel.INSIDE_BAR]
-        assert ib == []
+    def test_lookback_includes_ref(self):
+        """Same setup but with lookback=10 → ref IS included."""
+        # rows 1-9 have high=1.115 > sweep.high=1.11 → not swept bearish
+        # row 0 has unique high=1.105 → swept bearish only when in window
+        rows = [_c(i, 1.10, 1.115, 1.095, 1.10) for i in range(10)]
+        rows[0] = _c(0, 1.10, 1.105, 1.095, 1.10)
+        rows.append(_c(10, 1.10, 1.11, 1.096, 1.104))  # low=1.096>1.095 → no bullish
+        df = _df(*rows)
+        result = detect_crt(df, PAIR, lookback=10)
+        bearish = [s for s in result if s.direction == "bearish"
+                   and s.crt_h == pytest.approx(1.105)]
+        assert len(bearish) == 1
 
 
 # ---------------------------------------------------------------------------
-# Multi Candle CRT
+# Multiple setups
 # ---------------------------------------------------------------------------
 
-class TestMultiCandle:
-    def test_bullish_two_sweeps(self):
-        """Ref + 2 sweep candles below ref.low + final closes back above."""
+class TestMultipleSetups:
+    def test_multiple_refs_both_swept(self):
+        """Sweep candle sweeps 2 different ref_candles → 2 setups."""
         df = _df(
-            _candle(0, 1.10, 1.12, 1.08, 1.11),    # ref: low=1.08
-            _candle(1, 1.11, 1.115, 1.07, 1.075),  # sweep1: low=1.07 < ref.low=1.08 ✓
-            _candle(2, 1.075, 1.085, 1.07, 1.075), # sweep2: low=1.07 == sweep1.low (not inside-bar), < ref.low=1.08 ✓
-            _candle(3, 1.075, 1.11, 1.06, 1.09),   # final: close=1.09 > ref.low=1.08 ✓
+            _c(0, 1.10, 1.115, 1.095, 1.11),  # ref A: high=1.115
+            _c(1, 1.10, 1.120, 1.095, 1.11),  # ref B: high=1.120
+            _c(2, 1.10, 1.125, 1.096, 1.112), # sweep: high=1.125>both, close=1.112<1.115<1.120
         )
-        signals = detect(df, PAIR, GRAN)
-        multi = [s for s in signals if s.model == CRTModel.MULTI_CANDLE]
-        assert len(multi) >= 1
-        assert any(s.direction == Direction.BULLISH for s in multi)
+        result = detect_crt(df, PAIR, lookback=10)
+        bearish = [s for s in result if s.direction == "bearish"]
+        assert len(bearish) == 2
 
-    def test_bearish_two_sweeps(self):
-        """Ref + 2 sweep candles above ref.high + final closes back below."""
+    def test_sort_by_proximity(self):
+        """Setup whose range midpoint is closest to current price comes first."""
+        # sweep_candle at 1.105 midpoint (high=1.11, low=1.10)
+        # ref A: range 1.08–1.12, midpoint=1.10 → distance = |1.105-1.10| = 0.005
+        # ref B: range 1.06–1.09, midpoint=1.075 → distance = |1.105-1.075| = 0.030
         df = _df(
-            _candle(0, 1.10, 1.12, 1.08, 1.11),   # ref: high=1.12
-            _candle(1, 1.11, 1.14, 1.09, 1.13),   # sweep1: high=1.14 > ref.high=1.12 ✓
-            _candle(2, 1.13, 1.14, 1.10, 1.125),  # sweep2: high=1.14 == sweep1.high (not inside-bar), > ref.high=1.12 ✓
-            _candle(3, 1.125, 1.15, 1.09, 1.11),  # final: close=1.11 < ref.high=1.12 ✓
+            _c(0, 1.08, 1.09, 1.06, 1.08),    # ref B: low=1.06, high=1.09
+            _c(1, 1.09, 1.12, 1.08, 1.10),    # ref A: high=1.12
+            _c(2, 1.10, 1.13, 1.055, 1.085),  # sweep: high=1.13>1.12>1.09; close=1.085<1.09<1.12 → bearish both
         )
-        signals = detect(df, PAIR, GRAN)
-        multi = [s for s in signals if s.model == CRTModel.MULTI_CANDLE]
-        assert any(s.direction == Direction.BEARISH for s in multi)
+        result = detect_crt(df, PAIR, lookback=10)
+        # Both refs are bearish-swept; check ordering
+        bearish = [s for s in result if s.direction == "bearish"]
+        assert len(bearish) == 2
+        # ref A (high=1.12, midpoint=1.10) is closer to sweep midpoint=(1.13+1.055)/2=1.0925
+        # |1.0925 - 1.10| = 0.0075; |1.0925 - (1.09+1.06)/2| = |1.0925-1.075| = 0.0175
+        # ref A should come first
+        assert bearish[0].crt_h == pytest.approx(1.12)
+        assert bearish[1].crt_h == pytest.approx(1.09)
 
 
 # ---------------------------------------------------------------------------
-# Deduplication
+# expires_at
 # ---------------------------------------------------------------------------
 
-class TestDeduplication:
-    def test_inside_bar_wins_over_two_candle(self):
-        """Same sweep_time: INSIDE_BAR should win over TWO_CANDLE."""
+class TestExpiresAt:
+    def test_expires_at_is_sweep_plus_4h(self):
+        """expires_at == sweep_candle["time"] + 4 hours."""
         df = _df(
-            _candle(0, 1.10, 1.15, 1.05, 1.12),  # outer
-            _candle(1, 1.11, 1.13, 1.08, 1.12),  # inside bar
-            _candle(2, 1.12, 1.13, 1.07, 1.09),  # sweep (also qualifies as TWO_CANDLE vs inside)
+            _c(0, 1.10, 1.12, 1.09, 1.11),
+            _c(1, 1.11, 1.13, 1.095, 1.115),  # low=1.095>ref.low=1.09 → only bearish
         )
-        signals = detect(df, PAIR, GRAN)
-        bullish = [s for s in signals if s.direction == Direction.BULLISH]
-        # Only one signal per (sweep_time, direction)
-        assert len(bullish) == 1
-        assert bullish[0].model == CRTModel.INSIDE_BAR
+        result = detect_crt(df, PAIR)
+        assert len(result) == 1
+        sweep_time = _T0 + timedelta(hours=4)  # candle index 1
+        assert result[0].expires_at == pd.Timestamp(sweep_time) + pd.Timedelta(hours=4)
+
+    def test_pair_stored_correctly(self):
+        """CRTSetup.pair matches the pair argument."""
+        df = _df(
+            _c(0, 1.10, 1.12, 1.09, 1.11),
+            _c(1, 1.11, 1.13, 1.08, 1.115),
+        )
+        result = detect_crt(df, "GBP_USD")
+        assert result[0].pair == "GBP_USD"
