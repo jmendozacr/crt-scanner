@@ -35,7 +35,6 @@
 - [x] `tests/test_telegram_bot.py` — 26/26 ✓
 - [x] `check_phase5.py` — smoke test verificado (formato OK, --send disponible)
 
-## Fase 6 — Orquestación ⏳
-- [ ] `main.py` — loop asyncio, polling M15, pipeline completo por par
-- [ ] Integración end-to-end: data → CRT → confluence → entry → alert
-- [ ] Test de integración con un par en tiempo real
+## Fase 6 — Orquestación ✅
+- [x] `main.py` — bootstrap + loop asyncio con `poll_candles`, pipeline completo, shutdown limpio
+- [x] `check_phase6.py` — smoke test end-to-end verificado (bootstrap + pipeline, sin Telegram)
