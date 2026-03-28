@@ -220,22 +220,38 @@ async def _bootstrap(
 ) -> None:
     """One-shot startup: populate the store with 100 candles per pair × granularity.
 
-    Uses one batch request per granularity (3 requests total) to stay within
-    the Twelve Data free-tier rate limit of 8 requests/minute.
+    Uses individual requests (1 API credit each) with a 9-second delay between
+    them to stay under the Twelve Data free-tier limit of 8 credits/minute.
+    If a rate-limit error occurs (e.g. due to a restart mid-minute) the
+    bootstrap waits 65 seconds and retries instead of crashing.
     """
     granularities = ("D", "H4", "M15")
+    total = len(pairs) * len(granularities)
     logger.info(
-        "Bootstrap started — %d pairs × %d granularities (%d batch requests)",
-        len(pairs), len(granularities), len(granularities),
+        "Bootstrap started — %d pairs × %d granularities (%d requests, ~%ds)",
+        len(pairs), len(granularities), total, total * 9,
     )
 
-    for i, gran in enumerate(granularities):
-        batch = await client.get_candles_batch(pairs, gran, count=100)
-        for pair, candles in batch.items():
-            store.update(candles)
-        logger.info("Bootstrap complete — %s (%d pairs)", gran, len(batch))
-        if i < len(granularities) - 1:
-            await asyncio.sleep(10)
+    count = 0
+    for pair in pairs:
+        for gran in granularities:
+            while True:
+                try:
+                    candles = await client.get_candles(pair, gran, count=100)
+                    store.update(candles)
+                    break
+                except RuntimeError as exc:
+                    if "run out of API credits" in str(exc):
+                        logger.warning(
+                            "Rate limit hit during bootstrap — waiting 65s before retry"
+                        )
+                        await asyncio.sleep(65)
+                    else:
+                        raise
+            count += 1
+            if count < total:
+                await asyncio.sleep(9)
+        logger.info("Bootstrap complete for %s", pair)
 
     logger.info("Bootstrap finished — store ready")
 
