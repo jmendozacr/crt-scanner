@@ -46,16 +46,19 @@ def evaluate_setup_trade(
     Scans future_candles in order; first candle to touch TP or SL decides outcome.
     Returns OPEN if neither level is reached within the available data.
     """
-    entry_price = (ob.high + ob.low) / 2
-
+    # Entry at the near edge of the OB — where the order limit sits:
+    # Bullish: ob.high (top of the demand candle, first price touched on retrace)
+    # Bearish: ob.low  (bottom of the supply candle, first price touched on retrace)
     if setup.direction == "bullish":
-        sl_price = ob.low
-        tp_price = setup.crt_h
-        risk     = entry_price - sl_price
+        entry_price = ob.high
+        sl_price    = ob.low
+        tp_price    = setup.crt_h
+        risk        = entry_price - sl_price
     else:
-        sl_price = ob.high
-        tp_price = setup.crt_l
-        risk     = sl_price - entry_price
+        entry_price = ob.low
+        sl_price    = ob.high
+        tp_price    = setup.crt_l
+        risk        = sl_price - entry_price
 
     if risk <= 0:
         return TradeResult(
