@@ -112,3 +112,21 @@ class TelegramBot:
             return
 
         await asyncio.sleep(1)
+
+    async def send_text(self, text: str) -> None:
+        """Send a raw Markdown text string to Telegram. No deduplication."""
+        url = _SEND_MESSAGE_URL.format(token=self._token)
+        payload = {"chat_id": self._chat_id, "text": text, "parse_mode": "Markdown"}
+        try:
+            async with self._session.post(url, json=payload) as resp:
+                if resp.status == 200:
+                    logger.info("send_text: OK")
+                else:
+                    body = await resp.text()
+                    logger.error(
+                        "send_text: Telegram returned %d: %s", resp.status, body[:200]
+                    )
+        except aiohttp.ClientError as exc:
+            logger.error("send_text: network error: %s", exc)
+            return
+        await asyncio.sleep(1)

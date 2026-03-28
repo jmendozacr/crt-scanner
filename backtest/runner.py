@@ -1,28 +1,26 @@
 """
-Walk-forward backtest simulation for the CRT scanner.
+Walk-forward backtest simulation for the CRT scanner (Clutifx model).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 
+import pandas as pd
+
 from config import MinScore
-from core.crt_detector import detect
-from core.entry_models import find_entry
-from core.htf_confluence import run_confluence
+from core.crt_detector import detect_crt
+from core.entry_model import find_engulfing_ob
+from core.htf_confluence import get_key_levels
 from data.candle_store import CandleStore
 from data.twelvedata_client import TwelveDataClient
-from main import _passes_filter
+from main import _check_setup_confluence
 
-from backtest.evaluator import TradeResult, evaluate_trade
+from backtest.evaluator import TradeResult, evaluate_setup_trade
 
 logger = logging.getLogger(__name__)
 
 _RATE_LIMIT_SLEEP = 8.0   # seconds between get_candles calls (8 req/min free tier)
-# Per-granularity counts:
-#   D   — 200 candles; enough for recent key levels, avoids thousands of FVG/OB hits
-#   H4  — 5000 candles ≈ 2 years; provides a large pool of historical signals
-#   M15 — 5000 candles ≈ 52 days; defines the backtest evaluation window
 _CANDLE_COUNTS: dict[str, int] = {"D": 200, "H4": 5000, "M15": 5000}
 
 
@@ -32,7 +30,7 @@ async def bootstrap_backtest(
     pairs: list[str],
 ) -> None:
     """
-    Fetch _CANDLE_COUNT candles of D + H4 + M15 for each pair.
+    Fetch historical candles (D / H4 / M15) for each pair.
     Sleeps 8s between every request to stay within the free-tier rate limit.
     """
     granularities = ("D", "H4", "M15")
@@ -66,15 +64,16 @@ async def run_backtest(
     rr: float,
 ) -> list[TradeResult]:
     """
-    Walk-forward simulation across all pairs.
+    Walk-forward simulation across all pairs using the Clutifx model.
 
-    For each H4 CRT signal:
-      1. Checks that the signal falls within the available M15 data window.
-      2. Slices M15 to candles that existed at signal time (no look-ahead).
-      3. Runs find_entry() on the slice.
-      4. Evaluates the trade outcome against subsequent M15 candles.
+    For each H4 candle position i:
+      1. Call detect_crt on the slice h4[:i+1] — finds setups on the last candle.
+      2. Run HTF confluence check; skip if min_score=A and no level found.
+      3. Call find_engulfing_ob on M15 candles in the sweep window.
+      4. Scan subsequent M15 candles for OB touch or invalidation.
+      5. Evaluate trade outcome (WIN / LOSS / OPEN).
 
-    Returns a list of TradeResult (WIN, LOSS — OPEN trades with no future data excluded).
+    Returns a list of TradeResult (OPEN trades excluded).
     """
     results: list[TradeResult] = []
     seen: set[tuple] = set()   # dedup: (pair, sweep_time, direction)
@@ -96,61 +95,80 @@ async def run_backtest(
             m15_end.strftime("%Y-%m-%d"),
         )
 
-        signals = detect(h4_df, pair, "H4")
-        if not signals:
-            continue
+        # Fetch key levels once per pair (Daily candles are static for the backtest)
+        key_levels = get_key_levels(store, pair)
 
-        # Pre-filter to M15 coverage window BEFORE running confluence.
-        # This avoids processing thousands of historical signals that can
-        # never produce a trade result (no M15 data to find entries or
-        # evaluate outcomes).
-        in_window = [
-            s for s in signals
-            if m15_start <= s.sweep_time <= m15_end
-        ]
-        if not in_window:
-            logger.info("%s: no signals within M15 window — skipping", pair)
-            continue
-        logger.info("%s: %d signal(s) in M15 window (of %d total)", pair, len(in_window), len(signals))
+        # Walk forward through complete H4 candles
+        complete = h4_df[h4_df["complete"]].reset_index(drop=True)
 
-        confluence_results = run_confluence(in_window, store, pair)
-
-        for conf in confluence_results:
-            if not _passes_filter(conf, min_score):
+        for i in range(1, len(complete)):
+            slice_df = complete.iloc[:i + 1].copy()
+            setups = detect_crt(slice_df, pair)
+            if not setups:
                 continue
 
-            sweep_time = conf.signal.sweep_time
+            for setup in setups:
+                sweep_time = setup.sweep_candle["time"]
 
-            # Time-slice M15 to prevent look-ahead bias.
-            # Use tail(100) to mirror the live scanner's buffer_size=100,
-            # keeping detector performance in line with production.
-            m15_at_signal = m15_df[m15_df["time"] <= sweep_time].tail(100)
-            if len(m15_at_signal) < 3:
-                continue
+                if not (m15_start <= sweep_time <= m15_end):
+                    continue
 
-            entry = find_entry(conf, m15_at_signal)
-            if entry is None:
-                continue
+                dedup_key = (pair, sweep_time, setup.direction)
+                if dedup_key in seen:
+                    continue
 
-            # Dedup: one result per (pair, sweep_time, direction)
-            dedup_key = (pair, sweep_time, conf.signal.direction)
-            if dedup_key in seen:
-                continue
-            seen.add(dedup_key)
+                # HTF confluence filter
+                level = _check_setup_confluence(setup, key_levels)
+                if min_score == MinScore.A and level is None:
+                    continue
+                setup.htf_level = level
 
-            future = m15_df[m15_df["time"] > entry.time].reset_index(drop=True)
-            if len(future) == 0:
-                # Signal is at the very edge of available data — skip (unresolved)
-                continue
+                # Find OB in M15 during H4 sweep window
+                ob = find_engulfing_ob(m15_df, setup)
+                if ob is None:
+                    continue
 
-            result = evaluate_trade(entry, future, rr)
-            results.append(result)
-            logger.debug(
-                "%s | %s | %s | entry=%.5f sl=%.5f tp=%.5f → %s",
-                pair, entry.entry_model.value,
-                conf.signal.direction.value,
-                result.entry_price, result.sl_price, result.tp_price,
-                result.outcome,
-            )
+                seen.add(dedup_key)
+
+                # Scan M15 candles after OB: invalidation beats touch
+                after_ob = m15_df[m15_df["time"] > ob.formed_at].reset_index(drop=True)
+                if after_ob.empty:
+                    continue
+
+                touch_idx: int | None = None
+                for idx, row in after_ob.iterrows():
+                    close = float(row["close"])
+                    high  = float(row["high"])
+                    low   = float(row["low"])
+
+                    if setup.direction == "bearish":
+                        if close > ob.high:
+                            touch_idx = None; break   # invalidated
+                        if high >= ob.low:
+                            touch_idx = idx; break    # touched
+                    else:
+                        if close < ob.low:
+                            touch_idx = None; break   # invalidated
+                        if low <= ob.high:
+                            touch_idx = idx; break    # touched
+
+                if touch_idx is None:
+                    continue
+
+                future = after_ob.loc[touch_idx:].reset_index(drop=True)
+                if future.empty:
+                    continue
+
+                result = evaluate_setup_trade(setup, ob, future, rr)
+                if result.outcome == "OPEN":
+                    continue   # no future data — unresolved
+
+                results.append(result)
+                logger.debug(
+                    "%s | %s | entry=%.5f sl=%.5f tp=%.5f → %s",
+                    pair, setup.direction,
+                    result.entry_price, result.sl_price, result.tp_price,
+                    result.outcome,
+                )
 
     return results

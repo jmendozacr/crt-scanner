@@ -80,7 +80,7 @@ def print_report(
     # Group by pair
     by_pair: dict[str, list[TradeResult]] = defaultdict(list)
     for r in results:
-        by_pair[r.entry.pair].append(r)
+        by_pair[r.pair].append(r)
 
     all_win_pips: list[float] = []
     all_loss_pips: list[float] = []

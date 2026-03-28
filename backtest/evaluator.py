@@ -1,5 +1,5 @@
 """
-Single-trade outcome evaluation for the CRT backtest.
+Single-trade outcome evaluation for the CRT backtest (Clutifx model).
 """
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from core.models import Direction, EntrySignal
+from core.crt_detector import CRTSetup, OBLevel
 
 
 def _pip_multiplier(pair: str) -> float:
@@ -18,93 +18,92 @@ def _pip_multiplier(pair: str) -> float:
 
 @dataclass
 class TradeResult:
-    entry: EntrySignal
-    entry_price: float          # midpoint of entry_zone_low/high
-    sl_price: float             # crt_low (bull) or crt_high (bear)
-    tp_price: float             # entry ± risk × rr
-    outcome: str                # "WIN" | "LOSS" | "OPEN"
-    pnl_pips: float | None      # positive = win, negative = loss, None = OPEN
-    close_time: datetime | None # candle time that triggered resolution
+    pair:         str
+    direction:    str            # "bullish" | "bearish"
+    entry_price:  float          # midpoint of OB zone
+    sl_price:     float          # crt_l (bull) or crt_h (bear)
+    tp_price:     float          # entry ± risk × rr
+    outcome:      str            # "WIN" | "LOSS" | "OPEN"
+    pnl_pips:     float | None   # positive = win, negative = loss, None = OPEN
+    close_time:   datetime | None
 
 
-def evaluate_trade(
-    entry: EntrySignal,
+def evaluate_setup_trade(
+    setup: CRTSetup,
+    ob: OBLevel,
     future_candles: pd.DataFrame,
     rr: float,
 ) -> TradeResult:
     """
-    Evaluate a single trade by scanning candles after the entry trigger.
+    Evaluate a Clutifx trade outcome.
 
-    - SL = crt_low (BULLISH) or crt_high (BEARISH)
-    - TP = entry_price + risk * rr (BULLISH) or entry_price - risk * rr (BEARISH)
-    - Scans future_candles in order; first to touch TP or SL wins.
-    - Returns OPEN if neither level is reached within the available data.
+    Entry:  midpoint of ob.low / ob.high
+    SL:     crt_l (bullish) or crt_h (bearish)
+    TP:     entry ± risk × rr
+    Scans future_candles in order; first candle to touch TP or SL decides outcome.
+    Returns OPEN if neither level is reached within the available data.
     """
     if rr <= 0:
         raise ValueError(f"rr must be positive, got {rr}")
 
-    signal = entry.confluence.signal
-    direction = signal.direction
-    entry_price = (entry.entry_zone_low + entry.entry_zone_high) / 2
+    entry_price = (ob.high + ob.low) / 2
 
-    if direction == Direction.BULLISH:
-        sl_price = signal.crt_low
-        risk = entry_price - sl_price
+    if setup.direction == "bullish":
+        sl_price = setup.crt_l
+        risk     = entry_price - sl_price
         tp_price = entry_price + risk * rr
     else:
-        sl_price = signal.crt_high
-        risk = sl_price - entry_price
+        sl_price = setup.crt_h
+        risk     = sl_price - entry_price
         tp_price = entry_price - risk * rr
 
-    # Degenerate case: no meaningful risk
     if risk <= 0:
         return TradeResult(
-            entry=entry, entry_price=entry_price,
-            sl_price=sl_price, tp_price=tp_price,
+            pair=setup.pair, direction=setup.direction,
+            entry_price=entry_price, sl_price=sl_price, tp_price=tp_price,
             outcome="OPEN", pnl_pips=None, close_time=None,
         )
 
-    mult = _pip_multiplier(entry.pair)
+    mult = _pip_multiplier(setup.pair)
 
     for row in future_candles.itertuples(index=False):
-        if direction == Direction.BULLISH:
+        if setup.direction == "bullish":
             if row.high >= tp_price:
                 return TradeResult(
-                    entry=entry, entry_price=entry_price,
-                    sl_price=sl_price, tp_price=tp_price,
+                    pair=setup.pair, direction=setup.direction,
+                    entry_price=entry_price, sl_price=sl_price, tp_price=tp_price,
                     outcome="WIN",
                     pnl_pips=round(risk * rr * mult, 1),
                     close_time=row.time,
                 )
             if row.low <= sl_price:
                 return TradeResult(
-                    entry=entry, entry_price=entry_price,
-                    sl_price=sl_price, tp_price=tp_price,
+                    pair=setup.pair, direction=setup.direction,
+                    entry_price=entry_price, sl_price=sl_price, tp_price=tp_price,
                     outcome="LOSS",
                     pnl_pips=round(-risk * mult, 1),
                     close_time=row.time,
                 )
-        else:  # BEARISH
+        else:  # bearish
             if row.low <= tp_price:
                 return TradeResult(
-                    entry=entry, entry_price=entry_price,
-                    sl_price=sl_price, tp_price=tp_price,
+                    pair=setup.pair, direction=setup.direction,
+                    entry_price=entry_price, sl_price=sl_price, tp_price=tp_price,
                     outcome="WIN",
                     pnl_pips=round(risk * rr * mult, 1),
                     close_time=row.time,
                 )
             if row.high >= sl_price:
                 return TradeResult(
-                    entry=entry, entry_price=entry_price,
-                    sl_price=sl_price, tp_price=tp_price,
+                    pair=setup.pair, direction=setup.direction,
+                    entry_price=entry_price, sl_price=sl_price, tp_price=tp_price,
                     outcome="LOSS",
                     pnl_pips=round(-risk * mult, 1),
                     close_time=row.time,
                 )
 
-    # Neither TP nor SL was reached
     return TradeResult(
-        entry=entry, entry_price=entry_price,
-        sl_price=sl_price, tp_price=tp_price,
+        pair=setup.pair, direction=setup.direction,
+        entry_price=entry_price, sl_price=sl_price, tp_price=tp_price,
         outcome="OPEN", pnl_pips=None, close_time=None,
     )
