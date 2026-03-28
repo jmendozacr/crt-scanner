@@ -20,9 +20,9 @@ def _pip_multiplier(pair: str) -> float:
 class TradeResult:
     pair:         str
     direction:    str            # "bullish" | "bearish"
-    entry_price:  float          # midpoint of OB zone
-    sl_price:     float          # crt_l (bull) or crt_h (bear)
-    tp_price:     float          # entry ± risk × rr
+    entry_price:  float          # midpoint of OB zone (c1)
+    sl_price:     float          # ob.low (bull) | ob.high (bear)
+    tp_price:     float          # setup.crt_h (bull) | setup.crt_l (bear)
     outcome:      str            # "WIN" | "LOSS" | "OPEN"
     pnl_pips:     float | None   # positive = win, negative = loss, None = OPEN
     close_time:   datetime | None
@@ -32,30 +32,30 @@ def evaluate_setup_trade(
     setup: CRTSetup,
     ob: OBLevel,
     future_candles: pd.DataFrame,
-    rr: float,
+    rr: float = 0,  # kept for CLI compatibility; TP is determined by CRT level
 ) -> TradeResult:
     """
     Evaluate a Clutifx trade outcome.
 
-    Entry:  midpoint of ob.low / ob.high
-    SL:     crt_l (bullish) or crt_h (bearish)
-    TP:     entry ± risk × rr
+    Entry:  midpoint of ob.low / ob.high  (OB zone = c1 range)
+    SL:     ob.low  (bullish) — below the demand candle
+            ob.high (bearish) — above the supply candle
+    TP:     setup.crt_h (bullish) — the swept CRT high
+            setup.crt_l (bearish) — the swept CRT low
+
     Scans future_candles in order; first candle to touch TP or SL decides outcome.
     Returns OPEN if neither level is reached within the available data.
     """
-    if rr <= 0:
-        raise ValueError(f"rr must be positive, got {rr}")
-
     entry_price = (ob.high + ob.low) / 2
 
     if setup.direction == "bullish":
-        sl_price = setup.crt_l
+        sl_price = ob.low
+        tp_price = setup.crt_h
         risk     = entry_price - sl_price
-        tp_price = entry_price + risk * rr
     else:
-        sl_price = setup.crt_h
+        sl_price = ob.high
+        tp_price = setup.crt_l
         risk     = sl_price - entry_price
-        tp_price = entry_price - risk * rr
 
     if risk <= 0:
         return TradeResult(
@@ -64,7 +64,9 @@ def evaluate_setup_trade(
             outcome="OPEN", pnl_pips=None, close_time=None,
         )
 
-    mult = _pip_multiplier(setup.pair)
+    mult     = _pip_multiplier(setup.pair)
+    win_pips = round(abs(tp_price - entry_price) * mult, 1)
+    los_pips = round(-risk * mult, 1)
 
     for row in future_candles.itertuples(index=False):
         if setup.direction == "bullish":
@@ -72,34 +74,26 @@ def evaluate_setup_trade(
                 return TradeResult(
                     pair=setup.pair, direction=setup.direction,
                     entry_price=entry_price, sl_price=sl_price, tp_price=tp_price,
-                    outcome="WIN",
-                    pnl_pips=round(risk * rr * mult, 1),
-                    close_time=row.time,
+                    outcome="WIN", pnl_pips=win_pips, close_time=row.time,
                 )
             if row.low <= sl_price:
                 return TradeResult(
                     pair=setup.pair, direction=setup.direction,
                     entry_price=entry_price, sl_price=sl_price, tp_price=tp_price,
-                    outcome="LOSS",
-                    pnl_pips=round(-risk * mult, 1),
-                    close_time=row.time,
+                    outcome="LOSS", pnl_pips=los_pips, close_time=row.time,
                 )
         else:  # bearish
             if row.low <= tp_price:
                 return TradeResult(
                     pair=setup.pair, direction=setup.direction,
                     entry_price=entry_price, sl_price=sl_price, tp_price=tp_price,
-                    outcome="WIN",
-                    pnl_pips=round(risk * rr * mult, 1),
-                    close_time=row.time,
+                    outcome="WIN", pnl_pips=win_pips, close_time=row.time,
                 )
             if row.high >= sl_price:
                 return TradeResult(
                     pair=setup.pair, direction=setup.direction,
                     entry_price=entry_price, sl_price=sl_price, tp_price=tp_price,
-                    outcome="LOSS",
-                    pnl_pips=round(-risk * mult, 1),
-                    close_time=row.time,
+                    outcome="LOSS", pnl_pips=los_pips, close_time=row.time,
                 )
 
     return TradeResult(
