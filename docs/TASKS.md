@@ -30,9 +30,10 @@
 - [x] `tests/test_entry_models.py` — 13/13 ✓
 - [x] `check_phase4.py` — smoke test verificado (29 entradas en 7 pares)
 
-## Fase 5 — Telegram Alerts ⏳
-- [ ] `output/telegram_bot.py` — envío de alertas formateadas (Score A/B, par, dirección, entry zone, CRT H/L)
-- [ ] Test manual de formato de alerta
+## Fase 5 — Telegram Alerts ✅
+- [x] `output/telegram_bot.py` — `format_alert()` + `TelegramBot` con deduplicación y rate limit
+- [x] `tests/test_telegram_bot.py` — 26/26 ✓
+- [x] `check_phase5.py` — smoke test verificado (formato OK, --send disponible)
 
 ## Fase 6 — Orquestación ⏳
 - [ ] `main.py` — loop asyncio, polling M15, pipeline completo por par
