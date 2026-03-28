@@ -55,11 +55,12 @@ def print_report(
     results: list[TradeResult],
     rr: float,
     min_score_label: str,
+    lookback: int = 10,
 ) -> None:
     """Print a grouped console table of backtest results."""
     header = (
         f"Backtest Results  "
-        f"(RR 1:{rr:g}, Score {min_score_label}, ~52 days M15)"
+        f"(RR 1:{rr:g}, Score {min_score_label}, lookback={lookback}, ~52 days M15)"
     )
     col_header = (
         f"{'Pair':<10}{'Signals':>8}{'Wins':>6}{'Losses':>7}{'Open':>5}"

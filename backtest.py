@@ -38,6 +38,10 @@ def _parse_args() -> argparse.Namespace:
         default=settings.min_score.value,
         help="Minimum confluence score filter (default: from .env)",
     )
+    parser.add_argument(
+        "--lookback", type=int, default=10,
+        help="H4 candles to scan for CRT ref (default: 10)",
+    )
     return parser.parse_args()
 
 
@@ -60,8 +64,8 @@ async def main() -> None:
     )
     logger = logging.getLogger(__name__)
     logger.info(
-        "Backtest starting — %d pair(s), RR 1:%g, min_score=%s",
-        len(pairs), rr, min_score.value,
+        "Backtest starting — %d pair(s), RR 1:%g, min_score=%s, lookback=%d",
+        len(pairs), rr, min_score.value, args.lookback,
     )
 
     # Use a larger buffer to hold full historical data
@@ -69,9 +73,9 @@ async def main() -> None:
 
     async with TwelveDataClient(settings) as client:
         await bootstrap_backtest(client, store, pairs)
-        results = await run_backtest(store, pairs, min_score, rr)
+        results = await run_backtest(store, pairs, min_score, rr, lookback=args.lookback)
 
-    print_report(results, rr=rr, min_score_label=min_score.value)
+    print_report(results, rr=rr, min_score_label=min_score.value, lookback=args.lookback)
 
 
 if __name__ == "__main__":

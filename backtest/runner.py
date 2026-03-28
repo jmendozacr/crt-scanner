@@ -62,6 +62,7 @@ async def run_backtest(
     pairs: list[str],
     min_score: MinScore,
     rr: float,
+    lookback: int = 10,
 ) -> list[TradeResult]:
     """
     Walk-forward simulation across all pairs using the Clutifx model.
@@ -103,7 +104,7 @@ async def run_backtest(
 
         for i in range(1, len(complete)):
             slice_df = complete.iloc[:i + 1].copy()
-            setups = detect_crt(slice_df, pair)
+            setups = detect_crt(slice_df, pair, lookback=lookback)
             if not setups:
                 continue
 
