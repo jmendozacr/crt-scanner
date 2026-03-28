@@ -135,6 +135,24 @@ class TwelveDataClient:
     # Public methods
     # ------------------------------------------------------------------
 
+    async def get_candles_batch(
+        self,
+        pairs: list[str],
+        granularity: str,
+        count: int = 100,
+    ) -> dict[str, list[Candle]]:
+        """
+        Fetch the last `count` candles for multiple pairs in a single request.
+
+        Returns a dict keyed by internal pair name (EUR_USD).
+        """
+        if granularity not in _GRANULARITY_MAP:
+            raise ValueError(
+                f"Unknown granularity '{granularity}'. "
+                f"Valid values: {list(_GRANULARITY_MAP)}"
+            )
+        return await self._fetch_time_series(pairs, granularity, count=count)
+
     async def get_candles(
         self,
         pair: str,

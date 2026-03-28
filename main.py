@@ -218,23 +218,24 @@ async def _bootstrap(
     store: CandleStore,
     pairs: list[str],
 ) -> None:
-    """One-shot startup: populate the store with 100 candles per pair × granularity."""
+    """One-shot startup: populate the store with 100 candles per pair × granularity.
+
+    Uses one batch request per granularity (3 requests total) to stay within
+    the Twelve Data free-tier rate limit of 8 requests/minute.
+    """
     granularities = ("D", "H4", "M15")
-    total = len(pairs) * len(granularities)
-    count = 0
     logger.info(
-        "Bootstrap started — %d pairs × %d granularities (%d requests)",
-        len(pairs), len(granularities), total,
+        "Bootstrap started — %d pairs × %d granularities (%d batch requests)",
+        len(pairs), len(granularities), len(granularities),
     )
 
-    for pair in pairs:
-        for gran in granularities:
-            candles = await client.get_candles(pair, gran, count=100)
+    for i, gran in enumerate(granularities):
+        batch = await client.get_candles_batch(pairs, gran, count=100)
+        for pair, candles in batch.items():
             store.update(candles)
-            count += 1
-            if count < total:
-                await asyncio.sleep(8)
-        logger.info("Bootstrap complete for %s", pair)
+        logger.info("Bootstrap complete — %s (%d pairs)", gran, len(batch))
+        if i < len(granularities) - 1:
+            await asyncio.sleep(10)
 
     logger.info("Bootstrap finished — store ready")
 
