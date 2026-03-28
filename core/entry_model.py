@@ -76,14 +76,14 @@ def find_engulfing_ob(
         engulfs = c2_high >= c1_high and c2_low <= c1_low
 
         if setup.direction == "bearish":
-            # c1 bullish, c2 bearish engulfing → OB is c2
+            # c1 bullish, c2 bearish engulfing → OB zone is c1 (supply candle)
             if c1_close > c1_open and c2_close < c2_open and engulfs:
-                ob = OBLevel(high=c2_high, low=c2_low, formed_at=c2["time"])
+                ob = OBLevel(high=c1_high, low=c1_low, formed_at=c2["time"])
 
         else:  # bullish
-            # c1 bearish, c2 bullish engulfing → OB is c2
+            # c1 bearish, c2 bullish engulfing → OB zone is c1 (demand candle)
             if c1_close < c1_open and c2_close > c2_open and engulfs:
-                ob = OBLevel(high=c2_high, low=c2_low, formed_at=c2["time"])
+                ob = OBLevel(high=c1_high, low=c1_low, formed_at=c2["time"])
 
     logger.debug(
         "find_engulfing_ob: %s %s → %s",

@@ -21,7 +21,7 @@ import pandas as pd
 
 from config import MinScore, settings
 from core.crt_detector import CRTSetup, detect_crt
-from core.entry_model import check_ob_invalidation, check_ob_touch, find_engulfing_ob
+from core.entry_model import find_engulfing_ob
 from core.htf_confluence import get_key_levels
 from core.models import Direction, KeyLevel
 from data.candle_store import CandleStore
@@ -169,20 +169,11 @@ async def _on_m15_close(
             ob = find_engulfing_ob(m15_df, setup)
             if ob:
                 setup.ob     = ob
-                setup.status = "ob_formed"
+                setup.status = "triggered"
                 logger.info(
-                    "%s %s OB formed: %.5f – %.5f @ %s",
+                    "%s %s OB formed: %.5f – %.5f @ %s — sending alert",
                     pair, setup.direction, ob.low, ob.high, ob.formed_at,
                 )
-
-        elif setup.status == "ob_formed" and setup.ob is not None:
-            if check_ob_invalidation(m15_df, setup.ob, setup.direction):
-                setup.status = "invalidated"
-                logger.info("%s %s OB invalidated", pair, setup.direction)
-
-            elif check_ob_touch(m15_df, setup.ob, setup.direction):
-                setup.status = "triggered"
-                logger.info("%s %s TRIGGERED — sending alert", pair, setup.direction)
                 if bot is not None:
                     await bot.send_text(_build_alert(setup))
 

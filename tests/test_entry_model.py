@@ -63,17 +63,17 @@ def _setup(direction: str, h4_n: int = 0) -> CRTSetup:
 
 class TestFindEngulfingObBearish:
     def test_bearish_simple(self):
-        """Bullish M15 followed by bearish engulfing → OBLevel."""
+        """Bullish M15 followed by bearish engulfing → OBLevel with c1 range."""
         setup = _setup("bearish")
         df = _df(
-            _m(0, 1.100, 1.115, 1.095, 1.113),  # bullish: c > o
-            _m(1, 1.113, 1.120, 1.090, 1.100),  # bearish engulfing: h>=1.115, l<=1.095
+            _m(0, 1.100, 1.115, 1.095, 1.113),  # c1 bullish: h=1.115, l=1.095
+            _m(1, 1.113, 1.120, 1.090, 1.100),  # c2 bearish engulfing
         )
         ob = find_engulfing_ob(df, setup)
         assert ob is not None
-        assert ob.high == pytest.approx(1.120)
-        assert ob.low  == pytest.approx(1.090)
-        assert ob.formed_at == pd.Timestamp(_T0 + timedelta(minutes=15))
+        assert ob.high == pytest.approx(1.115)   # c1.high
+        assert ob.low  == pytest.approx(1.095)   # c1.low
+        assert ob.formed_at == pd.Timestamp(_T0 + timedelta(minutes=15))  # c2 time
 
     def test_bearish_no_engulf_returns_none(self):
         """Bearish c2 does NOT engulf c1 (high < c1.high) → None."""
@@ -85,17 +85,19 @@ class TestFindEngulfingObBearish:
         assert find_engulfing_ob(df, setup) is None
 
     def test_bearish_takes_last_occurrence(self):
-        """Two valid bearish engulfing pairs → returns the second (last) OB."""
+        """Two valid bearish engulfing pairs → OB zone from last c1, formed_at = last c2."""
         setup = _setup("bearish")
         df = _df(
-            _m(0, 1.100, 1.110, 1.095, 1.108),  # bullish 1
-            _m(1, 1.108, 1.115, 1.090, 1.095),  # bearish engulf 1 → OB candidate
-            _m(2, 1.095, 1.105, 1.088, 1.102),  # bullish 2
-            _m(3, 1.102, 1.112, 1.085, 1.090),  # bearish engulf 2 → final OB
+            _m(0, 1.100, 1.110, 1.095, 1.108),  # c1a bullish
+            _m(1, 1.108, 1.115, 1.090, 1.095),  # c2a bearish engulf
+            _m(2, 1.095, 1.105, 1.088, 1.102),  # c1b bullish: h=1.105, l=1.088
+            _m(3, 1.102, 1.112, 1.085, 1.090),  # c2b bearish engulf → final OB = c1b range
         )
         ob = find_engulfing_ob(df, setup)
         assert ob is not None
-        assert ob.formed_at == pd.Timestamp(_T0 + timedelta(minutes=45))
+        assert ob.high == pytest.approx(1.105)   # c1b.high
+        assert ob.low  == pytest.approx(1.088)   # c1b.low
+        assert ob.formed_at == pd.Timestamp(_T0 + timedelta(minutes=45))  # c2b time
 
     def test_bearish_out_of_window_returns_none(self):
         """M15 candle exactly at expires_at is excluded (window is half-open)."""
@@ -121,17 +123,17 @@ class TestFindEngulfingObBearish:
 
 class TestFindEngulfingObBullish:
     def test_bullish_simple(self):
-        """Bearish M15 followed by bullish engulfing → OBLevel."""
+        """Bearish M15 followed by bullish engulfing → OBLevel with c1 range."""
         setup = _setup("bullish")
         df = _df(
-            _m(0, 1.113, 1.120, 1.090, 1.100),  # bearish: c < o
-            _m(1, 1.100, 1.125, 1.085, 1.118),  # bullish engulfing: l<=1.090, h>=1.120
+            _m(0, 1.113, 1.120, 1.090, 1.100),  # c1 bearish: h=1.120, l=1.090
+            _m(1, 1.100, 1.125, 1.085, 1.118),  # c2 bullish engulfing
         )
         ob = find_engulfing_ob(df, setup)
         assert ob is not None
-        assert ob.high == pytest.approx(1.125)
-        assert ob.low  == pytest.approx(1.085)
-        assert ob.formed_at == pd.Timestamp(_T0 + timedelta(minutes=15))
+        assert ob.high == pytest.approx(1.120)   # c1.high
+        assert ob.low  == pytest.approx(1.090)   # c1.low
+        assert ob.formed_at == pd.Timestamp(_T0 + timedelta(minutes=15))  # c2 time
 
     def test_bullish_no_engulf_returns_none(self):
         """Bullish c2 does NOT engulf c1 (low > c1.low) → None."""
