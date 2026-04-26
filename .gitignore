@@ -35,6 +35,9 @@ Thumbs.db
 *.log
 logs/
 
+# Runtime data
+cache/
+
 # Testing
 .pytest_cache/
 .coverage

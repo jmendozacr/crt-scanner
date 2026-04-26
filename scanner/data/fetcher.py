@@ -116,7 +116,7 @@ class TwelveDataFetcher:
                     )
                     .as_json()
                 )
-                candles = [Candle.from_api({"datetime": dt, **vals}) for dt, vals in raw.items()]
+                candles = [Candle.from_api(row) for row in raw]
                 if not candles:
                     raise FetcherEmptyResponseError(f"Empty response for {symbol} 1day")
                 return _aggregate_daily(candles, _synthetic_factor(timeframe))
@@ -130,7 +130,7 @@ class TwelveDataFetcher:
                     )
                     .as_json()
                 )
-                candles = [Candle.from_api({"datetime": dt, **vals}) for dt, vals in raw.items()]
+                candles = [Candle.from_api(row) for row in raw]
                 if not candles:
                     raise FetcherEmptyResponseError(f"Empty response for {symbol} {timeframe}")
                 return candles
