@@ -7,6 +7,8 @@ import os
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -28,7 +30,7 @@ def normalize_filename(symbol: str, timeframe: str) -> str:
     return f"{symbol.replace('/', '_')}_{timeframe}.json"
 
 
-def fetch_and_save(symbol: str, timeframe: str, force: bool) -> None:
+def fetch_and_save(fetcher: TwelveDataFetcher, symbol: str, timeframe: str, force: bool) -> None:
     FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
     filename = normalize_filename(symbol, timeframe)
     path = FIXTURES_DIR / filename
@@ -37,8 +39,6 @@ def fetch_and_save(symbol: str, timeframe: str, force: bool) -> None:
         print(f"  skip  {filename} (already exists, use --force to overwrite)")
         return
 
-    api_key = os.environ["TWELVE_DATA_API_KEY"]
-    fetcher = TwelveDataFetcher(api_key=api_key)
     candles = fetcher.fetch(symbol, timeframe)
 
     rows = [
@@ -58,12 +58,18 @@ def fetch_and_save(symbol: str, timeframe: str, force: bool) -> None:
 
 
 def main(force: bool) -> None:
+    api_key = os.environ.get("TWELVE_DATA_API_KEY")
+    if not api_key:
+        print("ERROR: TWELVE_DATA_API_KEY not set.", file=sys.stderr)
+        sys.exit(1)
+
+    fetcher = TwelveDataFetcher(api_key=api_key)
     had_error = False
     for symbol in PAIRS:
         for timeframe in TIMEFRAMES:
             print(f"Fetching {symbol} {timeframe}...")
             try:
-                fetch_and_save(symbol, timeframe, force)
+                fetch_and_save(fetcher, symbol, timeframe, force)
             except Exception as exc:
                 print(f"  ERROR: {exc}")
                 had_error = True
