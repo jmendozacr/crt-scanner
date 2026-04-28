@@ -71,16 +71,18 @@ def scan_pair(pair: Pair, cache: CandleCache, tracker: AlertTracker) -> None:
     # Step 7 — OB takes priority
     model = ob if ob is not None else fvg
 
-    # Step 8 — SMT divergence check
-    partner_candles = cache.get(pair.smt_partner, settings.M15_TIMEFRAME)
-    smt = check_smt(
-        m15_candles,
-        partner_candles,
-        bias=crt.bias,
-        primary_symbol=symbol,
-        partner_symbol=pair.smt_partner,
-        correlation=pair.smt_correlation,
-    )
+    # Step 8 — SMT divergence check (optional — skipped when no partner defined)
+    smt = None
+    if pair.smt_partner is not None:
+        partner_candles = cache.get(pair.smt_partner, settings.M15_TIMEFRAME)
+        smt = check_smt(
+            m15_candles,
+            partner_candles,
+            bias=crt.bias,
+            primary_symbol=symbol,
+            partner_symbol=pair.smt_partner,
+            correlation=pair.smt_correlation,
+        )
 
     # Step 9 — format and send alert
     message = format_alert(symbol, crt, ts, model, smt)
