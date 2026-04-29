@@ -5,8 +5,10 @@ import pytest
 from scanner.detectors._common import Bias
 from scanner.detectors.crt_bias import CRTResult
 from scanner.detectors.fvg_detector import FVGResult
+from scanner.detectors.model1_detector import Model1Result
 from scanner.detectors.ob_detector import OrderBlockResult
 from scanner.detectors.smt_checker import SMTResult
+from scanner.detectors.turtle_body_soup import TBSResult
 from scanner.detectors.turtle_soup import TurtleSoupResult
 
 
@@ -91,6 +93,40 @@ def make_smt(
         primary_symbol=primary_symbol,
         partner_symbol=partner_symbol,
         correlation=correlation,
+    )
+
+
+def make_tbs(
+    bias: Bias = Bias.BULLISH,
+    swept_body_level: float = 1.10000,
+    swept_swing_datetime: str = "2024-01-15 08:00:00",
+    tbs_candle_datetime: str = "2024-01-15 09:15:00",
+    window_start: str = "2024-01-15 09:00",
+    window_end_hint: str = "",
+) -> TBSResult:
+    return TBSResult(
+        bias=bias,
+        swept_body_level=swept_body_level,
+        swept_swing_datetime=swept_swing_datetime,
+        tbs_candle_datetime=tbs_candle_datetime,
+        window_start=window_start,
+        window_end_hint=window_end_hint,
+    )
+
+
+def make_model1(
+    bias: Bias = Bias.BULLISH,
+    model1_candle_datetime: str = "2024-01-15 09:30:00",
+    entry_candle_datetime: str = "2024-01-15 09:45:00",
+    entry_price: float = 1.10050,
+    tp_level: float = 1.10200,
+) -> Model1Result:
+    return Model1Result(
+        bias=bias,
+        model1_candle_datetime=model1_candle_datetime,
+        entry_candle_datetime=entry_candle_datetime,
+        entry_price=entry_price,
+        tp_level=tp_level,
     )
 
 

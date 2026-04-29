@@ -1,4 +1,4 @@
-"""Tests for scanner.alerts.formatter — SC-ALT-1 through SC-ALT-11."""
+"""Tests for scanner.alerts.formatter — SC-ALT-1 through SC-ALT-13."""
 from __future__ import annotations
 
 import html
@@ -17,11 +17,19 @@ from scanner.alerts.formatter import (
 from scanner.detectors._common import Bias
 from scanner.detectors.crt_bias import CRTResult
 from scanner.detectors.fvg_detector import FVGResult
+from scanner.detectors.model1_detector import Model1Result
 from scanner.detectors.ob_detector import OrderBlockResult
 from scanner.detectors.smt_checker import SMTResult
 from scanner.detectors.turtle_soup import TurtleSoupResult
 
-from tests.alerts.conftest import make_crt, make_turtle_soup, make_ob, make_fvg, make_smt
+from tests.alerts.conftest import (
+    make_crt,
+    make_turtle_soup,
+    make_ob,
+    make_fvg,
+    make_smt,
+    make_model1,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -34,8 +42,9 @@ def _call_format_alert(
     symbol: str = "EUR/USD",
     crt: CRTResult | None = None,
     ts: TurtleSoupResult | None = None,
-    model_result: OrderBlockResult | FVGResult | None = None,
+    model_result: Model1Result | OrderBlockResult | FVGResult | None = None,
     smt: SMTResult | None = None,
+    session: str | None = None,
 ) -> str:
     if crt is None:
         crt = make_crt()
@@ -50,7 +59,7 @@ def _call_format_alert(
         mock_dt.utcnow.return_value.__str__ = lambda s: FIXED_UTC
         mock_dt.utcnow.return_value.strftime.return_value = FIXED_UTC
         mock_dt.fromisoformat.side_effect = __import__("datetime").datetime.fromisoformat
-        return format_alert(symbol, crt, ts, model_result, smt)
+        return format_alert(symbol, crt, ts, model_result, smt, session=session)
 
 
 # ---------------------------------------------------------------------------
@@ -321,3 +330,64 @@ class TestSCALT11FiveDecimalPrices:
         fvg = make_fvg(midpoint=1.10003)
         msg = _call_format_alert(model_result=fvg)
         assert "1.10003" in msg
+
+
+# ---------------------------------------------------------------------------
+# SC-ALT-12: Model1Result in alert
+# ---------------------------------------------------------------------------
+
+class TestSCALT12Model1Alert:
+    def _make_model1_alert(self, bias: Bias = Bias.BULLISH) -> str:
+        crt = make_crt(bias=bias, tp_level=1.10200 if bias is Bias.BULLISH else 1.09800)
+        ts = make_turtle_soup(bias=bias)
+        m1 = make_model1(
+            bias=bias,
+            entry_price=1.10050,
+            tp_level=crt.tp_level,
+        )
+        return _call_format_alert(crt=crt, ts=ts, model_result=m1, smt=None)
+
+    def test_model1_label_in_message(self) -> None:
+        msg = self._make_model1_alert()
+        assert "Model #1 (M15)" in msg
+
+    def test_model1_entry_price_in_message(self) -> None:
+        msg = self._make_model1_alert()
+        assert "1.10050" in msg
+
+    def test_model1_entry_line_label(self) -> None:
+        msg = self._make_model1_alert()
+        assert "Entrada Model #1:" in msg
+
+    def test_model1_tp_in_message(self) -> None:
+        msg = self._make_model1_alert()
+        assert "1.10200" in msg
+
+    def test_model1_bearish_sell_direction(self) -> None:
+        msg = self._make_model1_alert(bias=Bias.BEARISH)
+        assert "VENTA 📉" in msg
+
+    def test_smt_none_does_not_crash(self) -> None:
+        crt = make_crt()
+        ts = make_turtle_soup()
+        m1 = make_model1()
+        msg = _call_format_alert(crt=crt, ts=ts, model_result=m1, smt=None)
+        assert "SETUP DETECTADO" in msg
+
+
+# ---------------------------------------------------------------------------
+# SC-ALT-13: session line rendered when provided
+# ---------------------------------------------------------------------------
+
+class TestSCALT13SessionLine:
+    def test_session_line_present_when_provided(self) -> None:
+        msg = _call_format_alert(session="NY AM")
+        assert "NY AM" in msg
+
+    def test_session_line_absent_when_none(self) -> None:
+        msg = _call_format_alert(session=None)
+        assert "Sesión:" not in msg
+
+    def test_session_london_open(self) -> None:
+        msg = _call_format_alert(session="London Open")
+        assert "London Open" in msg

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from scanner.detectors import Bias
 from scanner.detectors.fvg_detector import FVGResult
+from scanner.detectors.model1_detector import Model1Result
 from scanner.detectors.ob_detector import OrderBlockResult
 
 if TYPE_CHECKING:
@@ -61,17 +62,29 @@ def _compute_window_end(window_start: str) -> str:
 
 # Tasks 1.7 & 1.8
 def _format_model_block(
-    model_result: OrderBlockResult | FVGResult,
+    model_result: Model1Result | OrderBlockResult | FVGResult,
     bias: Bias,
 ) -> tuple[str, str, float]:
-    """Return (model_name, model_line, entry_price) for OB or FVG.
+    """Return (model_name, model_line, entry_price) for Model1, OB, or FVG.
 
+    Model1 entry: entry_price field (open of the counter-directional candle).
     OB entry:
       BULLISH → ob_low  (buy at the bottom of the zone)
       BEARISH → ob_high (sell at the top of the zone)
     FVG entry:
       Both directions → midpoint
     """
+    if isinstance(model_result, Model1Result):
+        direction = "📈 BUY" if model_result.bias is Bias.BULLISH else "📉 SELL"
+        model_name = "Model #1 (M15)"
+        model_line = (
+            f"Model #1 (M15)\n"
+            f"Dirección: {direction}\n"
+            f"Entrada Model #1: {_format_price(model_result.entry_price)}\n"
+            f"TP: {_format_price(model_result.tp_level)}"
+        )
+        return model_name, model_line, model_result.entry_price
+
     if isinstance(model_result, OrderBlockResult):
         model_name = "Order Block (OB)"
         entry = model_result.ob_low if bias is Bias.BULLISH else model_result.ob_high
@@ -92,8 +105,9 @@ def format_alert(
     symbol: str,
     crt: CRTResult,
     ts: TurtleSoupResult,
-    model_result: OrderBlockResult | FVGResult,
-    smt: SMTResult,
+    model_result: Model1Result | OrderBlockResult | FVGResult,
+    smt: SMTResult | None,
+    session: str | None = None,
 ) -> str:
     """Assemble the full Telegram HTML alert message."""
     model_name, model_line, entry = _format_model_block(model_result, crt.bias)
@@ -124,8 +138,12 @@ def format_alert(
     safe_current_utc = html.escape(current_utc)
 
     smt_block = ""
-    if smt.has_divergence:
+    if smt is not None and smt.has_divergence:
         smt_block = f"\n⚠️ SMT: {html.escape(smt.note)}\n"
+
+    session_line = ""
+    if session is not None:
+        session_line = f"\n🕐 Sesión: {html.escape(session)}"
 
     message = (
         f"🔔 SETUP DETECTADO — {safe_symbol}\n"
@@ -143,7 +161,8 @@ def format_alert(
         f"🐢 Turtle Soup:\n"
         f"  • Origen: H4 {safe_ts_candle} UTC\n"
         f"  • Ventana M15: {safe_window_start} – {safe_window_end} UTC"
-        f"{smt_block}\n"
+        f"{smt_block}"
+        f"{session_line}\n"
         f"🕐 {safe_current_utc} UTC"
     )
 
