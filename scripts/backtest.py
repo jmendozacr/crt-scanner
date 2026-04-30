@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
+
+# When run as a script (python scripts/backtest.py), Python adds scripts/ to
+# sys.path instead of the project root. Fix it before any other imports.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import argparse
 
 from scripts.backtest_data import fetch_and_cache, load_candles
 from scripts.backtest_engine import FunnelCounts, TradeRecord, walk_pair
