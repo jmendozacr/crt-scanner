@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import argparse
 import logging
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 
 from scanner.alerts import AlertDeliveryError, format_alert, send_alert
 from scanner.config import settings
-from scanner.config.pairs import PAIRS, Pair
+from scanner.config.pairs import PAIRS, SYMBOLS, Pair
 from scanner.data.cache import CandleCache
 from scanner.data.fetcher import FetcherError, TwelveDataFetcher
 from scanner.detectors import (
     check_smt,
-    detect_crt_bias,
+    detect_smc_bias,
     detect_tbs,
     detect_model1,
     detect_turtle_soup,
@@ -36,13 +38,11 @@ def scan_pair(pair: Pair, cache: CandleCache, tracker: AlertTracker) -> None:
         logger.debug("Skipping %s — alert window still active", symbol)
         return
 
-    # Step 3 — HTF CRT bias
-    htf_candles = {
-        tf: cache.get(symbol, tf) for tf in settings.HTF_TIMEFRAMES
-    }
-    crt = detect_crt_bias(htf_candles)
+    # Step 3 — HTF SMC bias (1day)
+    htf_candles = cache.get(symbol, "1day")
+    crt = detect_smc_bias(htf_candles)
     if crt is None:
-        logger.debug("No CRT bias for %s", symbol)
+        logger.debug("No SMC bias for %s", symbol)
         return
 
     # Step 4 — H4 Turtle Soup
@@ -114,8 +114,13 @@ def scan_pair(pair: Pair, cache: CandleCache, tracker: AlertTracker) -> None:
     )
 
 
-def run_scan(cache: CandleCache, tracker: AlertTracker) -> None:
-    for pair in PAIRS:
+def run_scan(
+    cache: CandleCache,
+    tracker: AlertTracker,
+    pairs: list[Pair] | None = None,
+) -> None:
+    _pairs = pairs if pairs is not None else PAIRS
+    for pair in _pairs:
         try:
             scan_pair(pair, cache, tracker)
         except FetcherError as e:
@@ -131,6 +136,27 @@ def _seconds_to_next_m15() -> float:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="CRT Scanner")
+    parser.add_argument(
+        "--pair",
+        metavar="SYMBOL",
+        default=None,
+        help="Scan only this pair (default: all pairs)",
+    )
+    args = parser.parse_args()
+
+    selected_pairs: list[Pair] | None = None
+    if args.pair is not None:
+        normalized = args.pair.strip().upper()
+        if normalized not in SYMBOLS:
+            print(
+                f"Error: '{args.pair}' is not a valid pair. "
+                f"Valid pairs: {', '.join(SYMBOLS)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        selected_pairs = [p for p in PAIRS if p.symbol == normalized]
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s — %(message)s",
@@ -142,7 +168,7 @@ def main() -> None:
 
     while True:
         logger.info("Starting scan cycle")
-        run_scan(cache, tracker)
+        run_scan(cache, tracker, selected_pairs)
         wait = _seconds_to_next_m15()
         logger.info("Next scan in %.1f seconds", wait)
         time.sleep(wait)
