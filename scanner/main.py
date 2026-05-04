@@ -52,11 +52,8 @@ def scan_pair(pair: Pair, cache: CandleCache, tracker: AlertTracker) -> None:
         logger.debug("No Turtle Soup for %s", symbol)
         return
 
-    # Step 5 — session gate (hard filter on ts.ts_candle_datetime)
+    # Step 5 — session (informational only — no longer a hard gate)
     session = get_session(ts.ts_candle_datetime)
-    if session is None:
-        logger.debug("No active session for %s at %s", symbol, ts.ts_candle_datetime)
-        return
 
     # Step 6 — parse window_start, compute window_end
     try:
