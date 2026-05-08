@@ -18,6 +18,7 @@ def make_turtle_soup(
     ts_candle_datetime: str = "2024-01-15 08:00",
     window_start: str = "2024-01-15 08:00",
     window_end_hint: str = "",
+    tp_level: float | None = 1.10500,
 ) -> TurtleSoupResult:
     return TurtleSoupResult(
         bias=bias,
@@ -26,6 +27,7 @@ def make_turtle_soup(
         ts_candle_datetime=ts_candle_datetime,
         window_start=window_start,
         window_end_hint=window_end_hint,
+        tp_level=tp_level,
     )
 
 

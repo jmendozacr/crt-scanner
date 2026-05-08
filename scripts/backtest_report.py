@@ -66,7 +66,6 @@ def print_report(
     for f in funnels:
         print(f"\nFunnel ({f.symbol}):")
         print(f"  M15 steps:     {f.total_m15_steps}")
-        print(f"  Passed CRT:    {f.passed_crt}")
         print(f"  Passed TS:     {f.passed_ts}")
         print(f"  Passed session:{f.passed_session}")
         print(f"  Passed TBS:    {f.passed_tbs}")

@@ -173,3 +173,52 @@ class TestSCDETTS7Smoke:
         candles = load_fixture("EUR/USD", "4h")
         result = detect_turtle_soup(candles)
         assert result is None or isinstance(result, TurtleSoupResult)
+
+
+# ---------------------------------------------------------------------------
+# SC-DET-TS-8: tp_level is opposite swing high/low
+# ---------------------------------------------------------------------------
+
+
+def _bullish_with_tp() -> list:
+    # swing high at index 1 (TP target=1.10500), swing low at index 3 (swept)
+    c0 = make_candle("2024-01-15 00:00:00", open=1.10000, high=1.10100, low=1.09950, close=1.10050)
+    c1 = make_candle("2024-01-15 04:00:00", open=1.10050, high=1.10500, low=1.10000, close=1.10300)
+    c2 = make_candle("2024-01-15 08:00:00", open=1.10300, high=1.10200, low=1.09970, close=1.10100)
+    c3 = make_candle("2024-01-15 12:00:00", open=1.10100, high=1.10100, low=1.09500, close=1.09700)
+    c4 = make_candle("2024-01-15 16:00:00", open=1.09700, high=1.10000, low=1.09700, close=1.09900)
+    ts = make_candle("2024-01-15 20:00:00", open=1.09900, high=1.10050, low=1.09400, close=1.09600)
+    live = make_candle("2024-01-16 00:00:00")
+    return [c0, c1, c2, c3, c4, ts, live]
+
+
+def _bearish_with_tp() -> list:
+    # swing low at index 1 (TP target=1.09500), swing high at index 3 (swept)
+    c0 = make_candle("2024-01-15 00:00:00", open=1.10000, high=1.10050, low=1.09900, close=1.09950)
+    c1 = make_candle("2024-01-15 04:00:00", open=1.09950, high=1.10000, low=1.09500, close=1.09700)
+    c2 = make_candle("2024-01-15 08:00:00", open=1.09700, high=1.10050, low=1.09700, close=1.09900)
+    c3 = make_candle("2024-01-15 12:00:00", open=1.09900, high=1.10500, low=1.09900, close=1.10300)
+    c4 = make_candle("2024-01-15 16:00:00", open=1.10300, high=1.10200, low=1.10100, close=1.10150)
+    ts = make_candle("2024-01-15 20:00:00", open=1.10150, high=1.10600, low=1.10100, close=1.10400)
+    live = make_candle("2024-01-16 00:00:00")
+    return [c0, c1, c2, c3, c4, ts, live]
+
+
+class TestSCDETTS8TpLevel:
+    def test_bullish_tp_is_opposite_swing_high(self) -> None:
+        result = detect_turtle_soup(_bullish_with_tp())
+        assert result is not None
+        assert result.bias is Bias.BULLISH
+        assert result.tp_level == 1.10500
+
+    def test_bearish_tp_is_opposite_swing_low(self) -> None:
+        result = detect_turtle_soup(_bearish_with_tp())
+        assert result is not None
+        assert result.bias is Bias.BEARISH
+        assert result.tp_level == 1.09500
+
+    def test_tp_is_none_when_no_opposite_swing(self) -> None:
+        # _bullish_candles() has no fractal swing high → tp_level is None
+        result = detect_turtle_soup(_bullish_candles())
+        assert result is not None
+        assert result.tp_level is None

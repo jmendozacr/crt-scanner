@@ -4,7 +4,7 @@ import dataclasses
 from datetime import datetime, timedelta
 
 from scanner.data.candle import Candle
-from scanner.detectors import detect_crt_bias, detect_turtle_soup, detect_tbs, detect_model1
+from scanner.detectors import detect_turtle_soup, detect_tbs, detect_model1
 from scanner.detectors._common import Bias, exclude_live
 from scanner.utils.sessions import get_session
 
@@ -31,7 +31,6 @@ class TradeRecord:
 class FunnelCounts:
     symbol: str
     total_m15_steps: int = 0
-    passed_crt: int = 0
     passed_ts: int = 0
     passed_session: int = 0
     passed_tbs: int = 0
@@ -73,54 +72,44 @@ def walk_pair(
         funnel.total_m15_steps += 1
         current_dt = m15[k].datetime  # "%Y-%m-%d %H:%M:%S"
 
-        # Slice daily: only bars whose date <= current bar's date
-        raw_daily = [c for c in daily if c.datetime[:10] <= current_dt[:10]]
         raw_h4 = [c for c in h4 if c.datetime <= current_dt]
         raw_m15 = m15[: k + 1]
 
-        if not raw_daily or not raw_h4 or len(raw_m15) < 2:
+        if not raw_h4 or len(raw_m15) < 2:
             k += 1
             continue
 
-        daily_slice = exclude_live_with_dup(raw_daily)
         h4_slice = exclude_live_with_dup(raw_h4)
         m15_slice = exclude_live_with_dup(raw_m15)
 
-        # Stage 1: CRT (1day only in backtest)
-        crt = detect_crt_bias({"1day": daily_slice})
-        if crt is None:
-            k += 1
-            continue
-        funnel.passed_crt += 1
-
-        # Stage 2: H4 Turtle Soup
-        ts = detect_turtle_soup(h4_slice, crt.bias)
-        if ts is None:
+        # Stage 1: H4 Turtle Soup (bias derived from candle direction)
+        ts = detect_turtle_soup(h4_slice)
+        if ts is None or ts.tp_level is None:
             k += 1
             continue
         funnel.passed_ts += 1
 
-        # Stage 3: Session gate
+        # Stage 2: Session gate
         session = get_session(ts.ts_candle_datetime)
         if session is None:
             k += 1
             continue
         funnel.passed_session += 1
 
-        # Stage 4: TBS window
+        # Stage 3: TBS window
         ws_dt = datetime.strptime(ts.window_start, "%Y-%m-%d %H:%M:%S")
         we_dt = ws_dt + timedelta(hours=4)
         ws_str = ws_dt.strftime("%Y-%m-%d %H:%M")
         we_str = we_dt.strftime("%Y-%m-%d %H:%M")
-        tbs = detect_tbs(m15_slice, crt.bias, ws_str, we_str)
+        tbs = detect_tbs(m15_slice, ts.bias, ws_str, we_str)
         if tbs is None:
             k += 1
             continue
         funnel.passed_tbs += 1
 
-        # Stage 5: Model #1
+        # Stage 4: Model #1
         model1 = detect_model1(
-            m15_slice, crt.bias, tbs.tbs_candle_datetime, we_str, crt.tp_level
+            m15_slice, ts.bias, tbs.tbs_candle_datetime, we_str
         )
         if model1 is None:
             k += 1
@@ -142,25 +131,25 @@ def walk_pair(
             k += 1
             continue
 
-        # TP verification
+        # TP verification using opposite swing level from Turtle Soup
         result, bars_to_tp = verify_tp(
-            crt.bias.value,
-            crt.tp_level,
+            ts.bias.value,
+            ts.tp_level,
             m15[entry_idx + 1 : entry_idx + 1 + lookahead],
         )
 
         risk = abs(ts.swept_level - model1.entry_price)
         rr = (
-            round(abs(crt.tp_level - model1.entry_price) / risk, 2) if risk > 0 else 0.0
+            round(abs(ts.tp_level - model1.entry_price) / risk, 2) if risk > 0 else 0.0
         )
 
         trades.append(
             TradeRecord(
                 symbol=symbol,
                 session=session,
-                bias=crt.bias.value,
+                bias=ts.bias.value,
                 entry_price=model1.entry_price,
-                tp_level=crt.tp_level,
+                tp_level=ts.tp_level,
                 sweep_level=ts.swept_level,
                 result=result,
                 rr=rr,

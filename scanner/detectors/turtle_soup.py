@@ -16,6 +16,7 @@ class TurtleSoupResult:
     ts_candle_datetime: str
     window_start: str
     window_end_hint: str  # Populated by Phase 3; empty string here
+    tp_level: float | None  # Opposite swing high/low; None if no fractal found
 
 
 def detect_turtle_soup(
@@ -39,8 +40,12 @@ def detect_turtle_soup(
     if swing is None:
         return None
 
+    tp_side = Bias.BEARISH if internal_bias is Bias.BULLISH else Bias.BULLISH
+    tp_swing = find_previous_swing(closed, side=tp_side, anchor_index=len(closed) - 1)
+
     if internal_bias is Bias.BULLISH:
         if ts_candle.low < swing.low:
+            tp = tp_swing.high if tp_swing is not None else None
             return TurtleSoupResult(
                 bias=Bias.BULLISH,
                 swept_level=swing.low,
@@ -48,9 +53,11 @@ def detect_turtle_soup(
                 ts_candle_datetime=ts_candle.datetime,
                 window_start=ts_candle.datetime,
                 window_end_hint="",
+                tp_level=tp,
             )
     else:
         if ts_candle.high > swing.high:
+            tp = tp_swing.low if tp_swing is not None else None
             return TurtleSoupResult(
                 bias=Bias.BEARISH,
                 swept_level=swing.high,
@@ -58,6 +65,7 @@ def detect_turtle_soup(
                 ts_candle_datetime=ts_candle.datetime,
                 window_start=ts_candle.datetime,
                 window_end_hint="",
+                tp_level=tp,
             )
 
     return None
