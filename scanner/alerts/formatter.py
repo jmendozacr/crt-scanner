@@ -10,7 +10,6 @@ from scanner.detectors.model1_detector import Model1Result
 from scanner.detectors.ob_detector import OrderBlockResult
 
 if TYPE_CHECKING:
-    from scanner.detectors.crt_bias import CRTResult
     from scanner.detectors.smt_checker import SMTResult
     from scanner.detectors.turtle_soup import TurtleSoupResult
 
@@ -80,8 +79,7 @@ def _format_model_block(
         model_line = (
             f"Model #1 (M15)\n"
             f"Dirección: {direction}\n"
-            f"Entrada Model #1: {_format_price(model_result.entry_price)}\n"
-            f"TP: {_format_price(model_result.tp_level)}"
+            f"Entrada Model #1: {_format_price(model_result.entry_price)}"
         )
         return model_name, model_line, model_result.entry_price
 
@@ -103,21 +101,18 @@ def _format_model_block(
 # Task 1.9
 def format_alert(
     symbol: str,
-    crt: CRTResult,
     ts: TurtleSoupResult,
     model_result: Model1Result | OrderBlockResult | FVGResult,
     smt: SMTResult | None,
     session: str | None = None,
 ) -> str:
     """Assemble the full Telegram HTML alert message."""
-    model_name, model_line, entry = _format_model_block(model_result, crt.bias)
+    model_name, model_line, entry = _format_model_block(model_result, ts.bias)
 
-    direction = _format_direction(crt.bias)
-    bias_label = "Alcista" if crt.bias is Bias.BULLISH else "Bajista"
+    direction = _format_direction(ts.bias)
+    bias_label = "Alcista" if ts.bias is Bias.BULLISH else "Bajista"
 
-    sl = _compute_sl(crt.bias, entry)
-    tp = crt.tp_level
-    rr = _compute_rr(entry, sl, tp)
+    sl = _compute_sl(ts.bias, entry)
 
     window_start = ts.window_start
     window_end = _compute_window_end(window_start)
@@ -130,8 +125,6 @@ def format_alert(
     safe_model_name = html.escape(model_name)
     safe_model_line = html.escape(model_line)
     safe_bias_label = html.escape(bias_label)
-    safe_timeframe = html.escape(crt.timeframe)
-    safe_pattern = html.escape(crt.pattern)
     safe_ts_candle = html.escape(ts.ts_candle_datetime)
     safe_window_start = html.escape(window_start)
     safe_window_end = html.escape(window_end)
@@ -150,13 +143,11 @@ def format_alert(
         f"\n"
         f"📊 Dirección: {safe_direction}\n"
         f"📐 Modelo: {safe_model_name} (M15)\n"
-        f"🏦 Bias HTF: {safe_bias_label} (CRT {safe_timeframe} confirmado, {safe_pattern})\n"
+        f"🏦 Bias HTF: {safe_bias_label} (Turtle Soup H4)\n"
         f"\n"
         f"📍 Entrada:\n"
         f"  • {safe_model_line}\n"
         f"  • SL: {_format_price(sl)} (12 pips)\n"
-        f"  • TP: {_format_price(tp)}\n"
-        f"  • R:R: 1:{rr:.1f}\n"
         f"\n"
         f"🐢 Turtle Soup:\n"
         f"  • Origen: H4 {safe_ts_candle} UTC\n"

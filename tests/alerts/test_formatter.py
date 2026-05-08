@@ -15,7 +15,6 @@ from scanner.alerts.formatter import (
     format_alert,
 )
 from scanner.detectors._common import Bias
-from scanner.detectors.crt_bias import CRTResult
 from scanner.detectors.fvg_detector import FVGResult
 from scanner.detectors.model1_detector import Model1Result
 from scanner.detectors.ob_detector import OrderBlockResult
@@ -23,7 +22,6 @@ from scanner.detectors.smt_checker import SMTResult
 from scanner.detectors.turtle_soup import TurtleSoupResult
 
 from tests.alerts.conftest import (
-    make_crt,
     make_turtle_soup,
     make_ob,
     make_fvg,
@@ -40,14 +38,11 @@ FIXED_UTC = "2024-01-15 10:00"
 
 def _call_format_alert(
     symbol: str = "EUR/USD",
-    crt: CRTResult | None = None,
     ts: TurtleSoupResult | None = None,
     model_result: Model1Result | OrderBlockResult | FVGResult | None = None,
     smt: SMTResult | None = None,
     session: str | None = None,
 ) -> str:
-    if crt is None:
-        crt = make_crt()
     if ts is None:
         ts = make_turtle_soup()
     if model_result is None:
@@ -59,7 +54,7 @@ def _call_format_alert(
         mock_dt.utcnow.return_value.__str__ = lambda s: FIXED_UTC
         mock_dt.utcnow.return_value.strftime.return_value = FIXED_UTC
         mock_dt.fromisoformat.side_effect = __import__("datetime").datetime.fromisoformat
-        return format_alert(symbol, crt, ts, model_result, smt, session=session)
+        return format_alert(symbol, ts, model_result, smt, session=session)
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +68,7 @@ class TestSCALT1BullishOBFullMessage:
 
     def test_contains_direction_compra(self) -> None:
         msg = _call_format_alert(
-            crt=make_crt(bias=Bias.BULLISH),
+            ts=make_turtle_soup(bias=Bias.BULLISH),
             model_result=make_ob(bias=Bias.BULLISH),
         )
         assert "COMPRA 📈" in msg
@@ -84,7 +79,7 @@ class TestSCALT1BullishOBFullMessage:
 
     def test_contains_bias_alcista(self) -> None:
         msg = _call_format_alert(
-            crt=make_crt(bias=Bias.BULLISH),
+            ts=make_turtle_soup(bias=Bias.BULLISH),
             model_result=make_ob(bias=Bias.BULLISH),
         )
         assert "Alcista" in msg
@@ -111,16 +106,15 @@ class TestSCALT1BullishOBFullMessage:
 
 
 # ---------------------------------------------------------------------------
-# SC-ALT-2: BEARISH OB — SL above entry, TP below entry
+# SC-ALT-2: BEARISH OB — SL above entry
 # ---------------------------------------------------------------------------
 
 class TestSCALT2BearishOB:
     def _make_bearish_alert(self) -> str:
-        crt = make_crt(bias=Bias.BEARISH, tp_level=1.09800, sweep_level=1.10200)
         ob = make_ob(bias=Bias.BEARISH, ob_low=1.09950, ob_high=1.10050)
         ts = make_turtle_soup(bias=Bias.BEARISH)
         smt = make_smt()
-        return _call_format_alert(crt=crt, ts=ts, model_result=ob, smt=smt)
+        return _call_format_alert(ts=ts, model_result=ob, smt=smt)
 
     def test_contains_venta(self) -> None:
         assert "VENTA 📉" in self._make_bearish_alert()
@@ -133,11 +127,6 @@ class TestSCALT2BearishOB:
         # BEARISH OB: entry = ob_high = 1.10050, SL = 1.10050 + 0.0012 = 1.10170
         assert "1.10170" in msg
 
-    def test_tp_below_entry(self) -> None:
-        msg = self._make_bearish_alert()
-        # TP = tp_level = 1.09800
-        assert "1.09800" in msg
-
 
 # ---------------------------------------------------------------------------
 # SC-ALT-3: BULLISH FVG — midpoint as entry
@@ -145,10 +134,9 @@ class TestSCALT2BearishOB:
 
 class TestSCALT3BullishFVG:
     def _make_fvg_alert(self) -> str:
-        crt = make_crt(bias=Bias.BULLISH, tp_level=1.10200)
         fvg = make_fvg(bias=Bias.BULLISH, gap_low=1.09940, gap_high=1.10060, midpoint=1.10000)
         ts = make_turtle_soup(bias=Bias.BULLISH)
-        return _call_format_alert(crt=crt, ts=ts, model_result=fvg)
+        return _call_format_alert(ts=ts, model_result=fvg)
 
     def test_contains_fvg_model(self) -> None:
         assert "Fair Value Gap (FVG)" in self._make_fvg_alert()
@@ -173,10 +161,9 @@ class TestSCALT3BullishFVG:
 
 class TestSCALT4BearishFVG:
     def _make_bearish_fvg_alert(self) -> str:
-        crt = make_crt(bias=Bias.BEARISH, tp_level=1.09800)
         fvg = make_fvg(bias=Bias.BEARISH, gap_low=1.09940, gap_high=1.10060, midpoint=1.10000)
         ts = make_turtle_soup(bias=Bias.BEARISH)
-        return _call_format_alert(crt=crt, ts=ts, model_result=fvg)
+        return _call_format_alert(ts=ts, model_result=fvg)
 
     def test_contains_venta(self) -> None:
         assert "VENTA 📉" in self._make_bearish_fvg_alert()
@@ -217,50 +204,31 @@ class TestSCALT6SMTBlockAbsent:
 
 
 # ---------------------------------------------------------------------------
-# SC-ALT-7: R:R BULLISH
+# SC-ALT-7: R:R and TP NOT present in message
 # ---------------------------------------------------------------------------
 
-class TestSCALT7RRBullish:
-    def test_rr_bullish_ob(self) -> None:
-        # BULLISH OB: entry=ob_low=1.09950, SL=1.09830, TP=1.10200
-        # risk = 1.09950 - 1.09830 = 0.00120
-        # reward = 1.10200 - 1.09950 = 0.00250
-        # R:R = 0.00250 / 0.00120 = 2.0833 → "2.1"
-        entry = 1.09950
-        sl = _compute_sl(Bias.BULLISH, entry)
-        tp = 1.10200
-        rr = _compute_rr(entry, sl, tp)
-        assert f"{rr:.1f}" == "2.1"
-
-    def test_rr_shown_in_message(self) -> None:
-        crt = make_crt(bias=Bias.BULLISH, tp_level=1.10200)
+class TestSCALT7NoRROrTP:
+    def test_rr_not_in_message(self) -> None:
         ob = make_ob(bias=Bias.BULLISH, ob_low=1.09950, ob_high=1.10050)
-        msg = _call_format_alert(crt=crt, model_result=ob)
-        assert "R:R: 1:2.1" in msg
+        msg = _call_format_alert(model_result=ob)
+        assert "R:R:" not in msg
+
+    def test_tp_line_not_in_message(self) -> None:
+        ob = make_ob(bias=Bias.BULLISH, ob_low=1.09950, ob_high=1.10050)
+        msg = _call_format_alert(model_result=ob)
+        assert "• TP:" not in msg
 
 
 # ---------------------------------------------------------------------------
-# SC-ALT-8: R:R BEARISH
+# SC-ALT-8: R:R NOT present in bearish message either
 # ---------------------------------------------------------------------------
 
-class TestSCALT8RRBearish:
-    def test_rr_bearish_ob(self) -> None:
-        # BEARISH OB: entry=ob_high=1.10050, SL=1.10050+0.0012=1.10170, TP=1.09800
-        # risk = 1.10170 - 1.10050 = 0.00120
-        # reward = 1.10050 - 1.09800 = 0.00250
-        # R:R = 0.00250 / 0.00120 = 2.0833 → "2.1"
-        entry = 1.10050
-        sl = _compute_sl(Bias.BEARISH, entry)
-        tp = 1.09800
-        rr = _compute_rr(entry, sl, tp)
-        assert f"{rr:.1f}" == "2.1"
-
-    def test_rr_shown_in_bearish_message(self) -> None:
-        crt = make_crt(bias=Bias.BEARISH, tp_level=1.09800)
+class TestSCALT8NoRRBearish:
+    def test_rr_not_in_bearish_message(self) -> None:
         ob = make_ob(bias=Bias.BEARISH, ob_low=1.09950, ob_high=1.10050)
         ts = make_turtle_soup(bias=Bias.BEARISH)
-        msg = _call_format_alert(crt=crt, ts=ts, model_result=ob)
-        assert "R:R: 1:2.1" in msg
+        msg = _call_format_alert(ts=ts, model_result=ob)
+        assert "R:R:" not in msg
 
 
 # ---------------------------------------------------------------------------
@@ -321,11 +289,6 @@ class TestSCALT11FiveDecimalPrices:
         # SL = 1.09950 - 0.0012 = 1.09830
         assert "1.09830" in msg
 
-    def test_tp_formatted_to_5_decimals(self) -> None:
-        crt = make_crt(tp_level=1.10200)
-        msg = _call_format_alert(crt=crt)
-        assert "1.10200" in msg
-
     def test_fvg_midpoint_formatted_to_5_decimals(self) -> None:
         fvg = make_fvg(midpoint=1.10003)
         msg = _call_format_alert(model_result=fvg)
@@ -338,14 +301,12 @@ class TestSCALT11FiveDecimalPrices:
 
 class TestSCALT12Model1Alert:
     def _make_model1_alert(self, bias: Bias = Bias.BULLISH) -> str:
-        crt = make_crt(bias=bias, tp_level=1.10200 if bias is Bias.BULLISH else 1.09800)
         ts = make_turtle_soup(bias=bias)
         m1 = make_model1(
             bias=bias,
             entry_price=1.10050,
-            tp_level=crt.tp_level,
         )
-        return _call_format_alert(crt=crt, ts=ts, model_result=m1, smt=None)
+        return _call_format_alert(ts=ts, model_result=m1, smt=None)
 
     def test_model1_label_in_message(self) -> None:
         msg = self._make_model1_alert()
@@ -359,19 +320,18 @@ class TestSCALT12Model1Alert:
         msg = self._make_model1_alert()
         assert "Entrada Model #1:" in msg
 
-    def test_model1_tp_in_message(self) -> None:
+    def test_model1_tp_not_in_message(self) -> None:
         msg = self._make_model1_alert()
-        assert "1.10200" in msg
+        assert "• TP:" not in msg
 
     def test_model1_bearish_sell_direction(self) -> None:
         msg = self._make_model1_alert(bias=Bias.BEARISH)
         assert "VENTA 📉" in msg
 
     def test_smt_none_does_not_crash(self) -> None:
-        crt = make_crt()
         ts = make_turtle_soup()
         m1 = make_model1()
-        msg = _call_format_alert(crt=crt, ts=ts, model_result=m1, smt=None)
+        msg = _call_format_alert(ts=ts, model_result=m1, smt=None)
         assert "SETUP DETECTADO" in msg
 
 
@@ -391,3 +351,13 @@ class TestSCALT13SessionLine:
     def test_session_london_open(self) -> None:
         msg = _call_format_alert(session="London Open")
         assert "London Open" in msg
+
+
+# ---------------------------------------------------------------------------
+# SC-ALT-14: Bias HTF line shows "Turtle Soup H4"
+# ---------------------------------------------------------------------------
+
+class TestSCALT14BiasHTFLabel:
+    def test_bias_htf_line_shows_turtle_soup_h4(self) -> None:
+        msg = _call_format_alert()
+        assert "Turtle Soup H4" in msg

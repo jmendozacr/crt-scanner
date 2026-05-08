@@ -52,7 +52,6 @@ class TestSCM11BullishDetected:
     def test_bullish_model1_returns_result(self) -> None:
         tbs_dt = "2024-01-15 09:00:00"
         window_end = "2024-01-15 13:00"
-        tp = 1.10500
 
         # Thick counter-directional (bearish) candle after TBS
         m1 = _thick_bearish(datetime="2024-01-15 09:15:00", open=1.10100)
@@ -67,14 +66,13 @@ class TestSCM11BullishDetected:
         live = make_candle(datetime="2024-01-15 09:45:00")
 
         candles = [make_candle(datetime="2024-01-15 08:45:00"), m1, confirm, live]
-        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end, tp)
+        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end)
 
         assert result is not None
         assert result.bias is Bias.BULLISH
         assert result.model1_candle_datetime == m1.datetime
         assert result.entry_candle_datetime == confirm.datetime
         assert result.entry_price == pytest.approx(m1.open)
-        assert result.tp_level == pytest.approx(tp)
 
 
 # SC-M1-2: BEARISH Model #1 detected
@@ -82,7 +80,6 @@ class TestSCM12BearishDetected:
     def test_bearish_model1_returns_result(self) -> None:
         tbs_dt = "2024-01-15 09:00:00"
         window_end = "2024-01-15 13:00"
-        tp = 1.09500
 
         m1 = _thick_bullish(datetime="2024-01-15 09:15:00", open=1.09950)
         # Entry: close below m1.open (1.09950)
@@ -96,12 +93,11 @@ class TestSCM12BearishDetected:
         live = make_candle(datetime="2024-01-15 09:45:00")
 
         candles = [make_candle(datetime="2024-01-15 08:45:00"), m1, confirm, live]
-        result = detect_model1(candles, Bias.BEARISH, tbs_dt, window_end, tp)
+        result = detect_model1(candles, Bias.BEARISH, tbs_dt, window_end)
 
         assert result is not None
         assert result.bias is Bias.BEARISH
         assert result.entry_price == pytest.approx(m1.open)
-        assert result.tp_level == pytest.approx(tp)
 
 
 # SC-M1-3: returns None when no thick counter-directional candle
@@ -114,7 +110,7 @@ class TestSCM13NoThickCandle:
         live = make_candle(datetime="2024-01-15 09:30:00")
 
         candles = [make_candle(datetime="2024-01-15 08:45:00"), thin, live]
-        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end, 1.10500)
+        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end)
         assert result is None
 
 
@@ -136,7 +132,7 @@ class TestSCM14NoConfirmation:
         live = make_candle(datetime="2024-01-15 09:45:00")
 
         candles = [make_candle(datetime="2024-01-15 08:45:00"), m1, bad_confirm, live]
-        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end, 1.10500)
+        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end)
         assert result is None
 
 
@@ -151,7 +147,7 @@ class TestSCM15TBSWindowFilter:
         live = make_candle(datetime="2024-01-15 09:30:00")
 
         candles = [make_candle(datetime="2024-01-15 08:45:00"), at_tbs, live]
-        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end, 1.10500)
+        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end)
         assert result is None
 
 
@@ -166,7 +162,7 @@ class TestSCM16WindowEndFilter:
         live = make_candle(datetime="2024-01-15 09:30:00")
 
         candles = [make_candle(datetime="2024-01-15 08:45:00"), m1, live]
-        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end, 1.10500)
+        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end)
         assert result is None
 
 
@@ -175,7 +171,6 @@ class TestSCM1DojiSkipped:
     def test_doji_skipped_uses_next_thick_candle(self) -> None:
         tbs_dt = "2024-01-15 09:00:00"
         window_end = "2024-01-15 13:00"
-        tp = 1.10500
 
         # Doji: high == low — body_ratio computation must be skipped (no ZeroDivisionError)
         doji = make_candle(
@@ -198,7 +193,7 @@ class TestSCM1DojiSkipped:
         live = make_candle(datetime="2024-01-15 10:00:00")
 
         candles = [make_candle(datetime="2024-01-15 08:45:00"), doji, m1, confirm, live]
-        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end, tp)
+        result = detect_model1(candles, Bias.BULLISH, tbs_dt, window_end)
 
         assert result is not None, "Doji must be skipped without error; next thick candle must be used"
         assert result.model1_candle_datetime == m1.datetime

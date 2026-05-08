@@ -20,20 +20,27 @@ class TurtleSoupResult:
 
 def detect_turtle_soup(
     h4_candles: list[Candle],
-    htf_bias: Bias,
 ) -> TurtleSoupResult | None:
-    """Detect a Turtle Soup liquidity sweep on H4 aligned with the HTF bias."""
+    """Detect a Turtle Soup liquidity sweep on H4, deriving bias from the candle direction."""
     closed = exclude_live(h4_candles)
     if len(closed) < 3:
         return None
 
     ts_candle = closed[-1]
-    swing = find_previous_swing(closed, side=htf_bias, anchor_index=len(closed) - 1)
+
+    if ts_candle.close < ts_candle.open:
+        internal_bias = Bias.BULLISH
+    elif ts_candle.close > ts_candle.open:
+        internal_bias = Bias.BEARISH
+    else:
+        return None
+
+    swing = find_previous_swing(closed, side=internal_bias, anchor_index=len(closed) - 1)
     if swing is None:
         return None
 
-    if htf_bias is Bias.BULLISH:
-        if ts_candle.low < swing.low and ts_candle.close > ts_candle.open:
+    if internal_bias is Bias.BULLISH:
+        if ts_candle.low < swing.low:
             return TurtleSoupResult(
                 bias=Bias.BULLISH,
                 swept_level=swing.low,
@@ -43,7 +50,7 @@ def detect_turtle_soup(
                 window_end_hint="",
             )
     else:
-        if ts_candle.high > swing.high and ts_candle.close < ts_candle.open:
+        if ts_candle.high > swing.high:
             return TurtleSoupResult(
                 bias=Bias.BEARISH,
                 swept_level=swing.high,

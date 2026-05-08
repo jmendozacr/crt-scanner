@@ -13,7 +13,6 @@ from scanner.data.cache import CandleCache
 from scanner.data.fetcher import FetcherError, TwelveDataFetcher
 from scanner.detectors import (
     check_smt,
-    detect_smc_bias,
     detect_tbs,
     detect_model1,
     detect_turtle_soup,
@@ -38,24 +37,17 @@ def scan_pair(pair: Pair, cache: CandleCache, tracker: AlertTracker) -> None:
         logger.debug("Skipping %s — alert window still active", symbol)
         return
 
-    # Step 3 — HTF SMC bias (1day)
-    htf_candles = cache.get(symbol, "1day")
-    crt = detect_smc_bias(htf_candles)
-    if crt is None:
-        logger.debug("No SMC bias for %s", symbol)
-        return
-
-    # Step 4 — H4 Turtle Soup
+    # Step 3 — H4 Turtle Soup (bias derived internally)
     h4_candles = cache.get(symbol, settings.H4_TIMEFRAME)
-    ts = detect_turtle_soup(h4_candles, crt.bias)
+    ts = detect_turtle_soup(h4_candles)
     if ts is None:
         logger.debug("No Turtle Soup for %s", symbol)
         return
 
-    # Step 5 — session (informational only — no longer a hard gate)
+    # Step 4 — session (informational only — no longer a hard gate)
     session = get_session(ts.ts_candle_datetime)
 
-    # Step 6 — parse window_start, compute window_end
+    # Step 5 — parse window_start, compute window_end
     try:
         window_start_dt = datetime.strptime(ts.window_start, _TS_FMT)
     except ValueError:
@@ -64,47 +56,46 @@ def scan_pair(pair: Pair, cache: CandleCache, tracker: AlertTracker) -> None:
     window_start_str = window_start_dt.strftime(_WINDOW_FMT)
     window_end_str = window_end_dt.strftime(_WINDOW_FMT)
 
-    # Step 7 — M15 TBS
+    # Step 6 — M15 TBS
     m15_candles = cache.get(symbol, settings.M15_TIMEFRAME)
-    tbs = detect_tbs(m15_candles, crt.bias, window_start_str, window_end_str)
+    tbs = detect_tbs(m15_candles, ts.bias, window_start_str, window_end_str)
     if tbs is None:
         logger.debug("No TBS for %s", symbol)
         return
 
-    # Step 8 — M15 Model #1
+    # Step 7 — M15 Model #1
     model1 = detect_model1(
         m15_candles,
-        crt.bias,
+        ts.bias,
         tbs.tbs_candle_datetime,
         window_end_str,
-        crt.tp_level,
     )
     if model1 is None:
         logger.debug("No Model #1 for %s", symbol)
         return
 
-    # Step 9 — SMT divergence check (optional — skipped when no partner defined)
+    # Step 8 — SMT divergence check (optional — skipped when no partner defined)
     smt = None
     if pair.smt_partner is not None:
         partner_candles = cache.get(pair.smt_partner, settings.M15_TIMEFRAME)
         smt = check_smt(
             m15_candles,
             partner_candles,
-            bias=crt.bias,
+            bias=ts.bias,
             primary_symbol=symbol,
             partner_symbol=pair.smt_partner,
             correlation=pair.smt_correlation,
         )
 
-    # Step 10 — format and send alert
-    message = format_alert(symbol, crt, ts, model1, smt, session=session)
+    # Step 9 — format and send alert
+    message = format_alert(symbol, ts, model1, smt, session=session)
     try:
         send_alert(message)
     except AlertDeliveryError as e:
         logger.warning("Alert delivery failed for %s: %s", symbol, e.reason)
         return
 
-    # Step 11 — mark alerted only after successful delivery
+    # Step 10 — mark alerted only after successful delivery
     tracker.mark_alerted(symbol, window_start_dt, window_end_dt)
     logger.info(
         "Alert sent for %s — window %s to %s", symbol, window_start_str, window_end_str

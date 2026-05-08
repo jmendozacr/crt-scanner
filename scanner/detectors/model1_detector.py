@@ -14,7 +14,6 @@ class Model1Result:
     model1_candle_datetime: str
     entry_candle_datetime: str
     entry_price: float
-    tp_level: float
 
 
 def detect_model1(
@@ -22,7 +21,6 @@ def detect_model1(
     bias: Bias,
     tbs_candle_datetime: str,
     window_end: str,
-    tp_level: float,
 ) -> Model1Result | None:
     closed = exclude_live(m15_candles)
     tbs_dt = tbs_candle_datetime[:16]
@@ -59,7 +57,6 @@ def detect_model1(
                 model1_candle_datetime=m1_candle.datetime,
                 entry_candle_datetime=entry_c.datetime,
                 entry_price=m1_candle.open,
-                tp_level=tp_level,
             )
         if bias is Bias.BEARISH and entry_c.close < m1_candle.open:
             return Model1Result(
@@ -67,6 +64,5 @@ def detect_model1(
                 model1_candle_datetime=m1_candle.datetime,
                 entry_candle_datetime=entry_c.datetime,
                 entry_price=m1_candle.open,
-                tp_level=tp_level,
             )
     return None

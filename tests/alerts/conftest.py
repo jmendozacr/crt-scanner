@@ -3,31 +3,12 @@ from __future__ import annotations
 import pytest
 
 from scanner.detectors._common import Bias
-from scanner.detectors.crt_bias import CRTResult
 from scanner.detectors.fvg_detector import FVGResult
 from scanner.detectors.model1_detector import Model1Result
 from scanner.detectors.ob_detector import OrderBlockResult
 from scanner.detectors.smt_checker import SMTResult
 from scanner.detectors.turtle_body_soup import TBSResult
 from scanner.detectors.turtle_soup import TurtleSoupResult
-
-
-def make_crt(
-    bias: Bias = Bias.BULLISH,
-    timeframe: str = "1day",
-    pattern: str = "2-candle",
-    tp_level: float = 1.10200,
-    sweep_level: float = 1.09800,
-    anchor_datetime: str = "2024-01-15 00:00",
-) -> CRTResult:
-    return CRTResult(
-        bias=bias,
-        timeframe=timeframe,
-        pattern=pattern,
-        tp_level=tp_level,
-        sweep_level=sweep_level,
-        anchor_datetime=anchor_datetime,
-    )
 
 
 def make_turtle_soup(
@@ -119,25 +100,13 @@ def make_model1(
     model1_candle_datetime: str = "2024-01-15 09:30:00",
     entry_candle_datetime: str = "2024-01-15 09:45:00",
     entry_price: float = 1.10050,
-    tp_level: float = 1.10200,
 ) -> Model1Result:
     return Model1Result(
         bias=bias,
         model1_candle_datetime=model1_candle_datetime,
         entry_candle_datetime=entry_candle_datetime,
         entry_price=entry_price,
-        tp_level=tp_level,
     )
-
-
-@pytest.fixture
-def bullish_crt() -> CRTResult:
-    return make_crt(bias=Bias.BULLISH)
-
-
-@pytest.fixture
-def bearish_crt() -> CRTResult:
-    return make_crt(bias=Bias.BEARISH)
 
 
 @pytest.fixture
